@@ -1,0 +1,36 @@
+{
+  "name": "telegram-sweeper-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for auto-sweeping native and ERC-20 tokens across multiple chains using Alchemy + ethers.js",
+  "main": "telegram-sweeper.js",
+  "scripts": {
+    "start": "node telegram-sweeper.js",
+    "dev": "nodemon telegram-sweeper.js",
+    "test": "node test-config.js",
+    "test-mode": "node test-mode-demo.js",
+    "test-explorer": "node test-explorer-links.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "ethers": "^5.7.2",
+    "node-fetch": "^2.6.7",
+    "node-telegram-bot-api": "^0.61.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "crypto",
+    "sweeper",
+    "ethers",
+    "alchemy",
+    "erc20"
+  ],
+  "author": "",
+  "license": "MIT"
+}
