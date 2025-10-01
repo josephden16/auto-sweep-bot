@@ -1,11 +1,11 @@
 {
-  "name": "telegram-sweeper-bot",
+  "name": "telegram-eth-sweeper-bot",
   "version": "1.0.0",
   "description": "Telegram bot for auto-sweeping native and ERC-20 tokens across multiple chains using Alchemy + ethers.js",
-  "main": "telegram-sweeper.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node telegram-sweeper.js",
-    "dev": "nodemon telegram-sweeper.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
