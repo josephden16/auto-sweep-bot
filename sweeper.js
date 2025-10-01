@@ -1,5 +1,4 @@
 const { ethers } = require("ethers");
-const fs = require("fs");
 const fetch = require("node-fetch");
 const {
   getWalletFromMnemonic,
@@ -8,9 +7,247 @@ const {
   sweepNative,
   getExplorerLink,
   estimateTokenGasCosts,
-  getChainConfigWithMode,
   getOptimalGasPricing,
+  getChainConfigWithMode,
 } = require("./wallet-utils");
+
+// ===== OPTIMIZED PRICE MANAGER =====
+class PriceManager {
+  constructor() {
+    this.cache = new Map(); // symbol -> { price, timestamp }
+    this.pendingRequests = new Map(); // symbol -> Promise
+    this.lastRequestTime = 0;
+    this.requestQueue = [];
+    this.isProcessingQueue = false;
+
+    // Configuration
+    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    this.RATE_LIMIT_DELAY = 1000; // 1 second between requests
+    this.BATCH_SIZE = 30; // Max symbols per batch request
+    this.MAX_RETRIES = 3;
+    this.RETRY_DELAY = 2000; // 2 seconds
+  }
+
+  // Get price with caching and batching
+  async getPrice(symbol) {
+    if (!symbol) return 0;
+
+    const normalizedSymbol = symbol.toLowerCase();
+
+    // Check cache first
+    const cached = this.cache.get(normalizedSymbol);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+      return cached.price;
+    }
+
+    // Check if request is already pending
+    if (this.pendingRequests.has(normalizedSymbol)) {
+      return await this.pendingRequests.get(normalizedSymbol);
+    }
+
+    // Create new request promise
+    const requestPromise = this._queuePriceRequest(normalizedSymbol);
+    this.pendingRequests.set(normalizedSymbol, requestPromise);
+
+    try {
+      const price = await requestPromise;
+      return price;
+    } finally {
+      this.pendingRequests.delete(normalizedSymbol);
+    }
+  }
+
+  // Get multiple prices efficiently
+  async getPrices(symbols) {
+    if (!symbols || symbols.length === 0) return {};
+
+    const normalizedSymbols = [
+      ...new Set(symbols.filter((s) => s).map((s) => s.toLowerCase())),
+    ];
+    const results = {};
+    const needsRefresh = [];
+
+    // Check cache for each symbol
+    for (const symbol of normalizedSymbols) {
+      const cached = this.cache.get(symbol);
+      if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
+        results[symbol] = { usd: cached.price };
+      } else {
+        needsRefresh.push(symbol);
+      }
+    }
+
+    // Fetch missing prices in batches
+    if (needsRefresh.length > 0) {
+      const freshPrices = await this._batchFetchPrices(needsRefresh);
+      Object.assign(results, freshPrices);
+    }
+
+    return results;
+  }
+
+  // Queue a price request for batch processing
+  async _queuePriceRequest(symbol) {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ symbol, resolve, reject });
+      this._processQueue();
+    });
+  }
+
+  // Process queued requests in batches
+  async _processQueue() {
+    if (this.isProcessingQueue || this.requestQueue.length === 0) return;
+
+    this.isProcessingQueue = true;
+
+    try {
+      // Wait for rate limit
+      const timeSinceLastRequest = Date.now() - this.lastRequestTime;
+      if (timeSinceLastRequest < this.RATE_LIMIT_DELAY) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.RATE_LIMIT_DELAY - timeSinceLastRequest)
+        );
+      }
+
+      // Take batch from queue
+      const batch = this.requestQueue.splice(0, this.BATCH_SIZE);
+      const symbols = batch.map((item) => item.symbol);
+
+      try {
+        const prices = await this._batchFetchPrices(symbols);
+
+        // Resolve all requests in batch
+        for (const item of batch) {
+          const price = prices[item.symbol]?.usd || 0;
+          item.resolve(price);
+        }
+      } catch (error) {
+        // Reject all requests in batch
+        for (const item of batch) {
+          item.reject(error);
+        }
+      }
+
+      this.lastRequestTime = Date.now();
+    } finally {
+      this.isProcessingQueue = false;
+
+      // Process remaining queue items
+      if (this.requestQueue.length > 0) {
+        setTimeout(() => this._processQueue(), this.RATE_LIMIT_DELAY);
+      }
+    }
+  }
+
+  // Batch fetch prices from CoinGecko with retry logic
+  async _batchFetchPrices(symbols, retryCount = 0) {
+    if (symbols.length === 0) return {};
+
+    try {
+      const symbolsParam = symbols.join(",");
+      const url = `https://api.coingecko.com/api/v3/simple/price?symbols=${symbolsParam}&vs_currencies=usd`;
+
+      console.log(
+        `🔍 Fetching prices for ${symbols.length} symbols: ${symbols.join(
+          ", "
+        )}`
+      );
+
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Auto-Sweep-Bot/1.0",
+        },
+      });
+
+      if (response.status === 429) {
+        // Rate limited
+        const retryAfter = parseInt(
+          response.headers.get("retry-after") || "60"
+        );
+        console.log(`⚠️ CoinGecko rate limited, waiting ${retryAfter}s...`);
+        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+        return await this._batchFetchPrices(symbols, retryCount);
+      }
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+
+      // Cache results
+      for (const [symbol, priceData] of Object.entries(data)) {
+        if (priceData && priceData.usd) {
+          this.cache.set(symbol, {
+            price: priceData.usd,
+            timestamp: Date.now(),
+          });
+        }
+      }
+
+      console.log(`✅ Cached ${Object.keys(data).length} price(s)`);
+      return data;
+    } catch (error) {
+      console.log(
+        `❌ Price fetch error (attempt ${retryCount + 1}): ${error.message}`
+      );
+
+      if (retryCount < this.MAX_RETRIES) {
+        const delay = this.RETRY_DELAY * Math.pow(2, retryCount); // Exponential backoff
+        console.log(`⏳ Retrying in ${delay}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        return await this._batchFetchPrices(symbols, retryCount + 1);
+      }
+
+      // Return empty object on final failure
+      console.log(
+        `💥 Final failure fetching prices for: ${symbols.join(", ")}`
+      );
+      return {};
+    }
+  }
+
+  // Clear expired cache entries
+  clearExpiredCache() {
+    const now = Date.now();
+    for (const [symbol, data] of this.cache.entries()) {
+      if (now - data.timestamp > this.CACHE_TTL) {
+        this.cache.delete(symbol);
+      }
+    }
+  }
+
+  // Get cache stats for debugging
+  getCacheStats() {
+    return {
+      size: this.cache.size,
+      pendingRequests: this.pendingRequests.size,
+      queueLength: this.requestQueue.length,
+    };
+  }
+}
+
+// Global price manager instance
+const priceManager = new PriceManager();
+
+// Pre-warm cache with common tokens on startup
+async function preWarmPriceCache() {
+  const commonTokens = ["eth", "matic", "mnt", "usdt", "usdc", "weth", "wbtc"];
+  console.log("🔥 Pre-warming price cache with common tokens...");
+  try {
+    await priceManager.getPrices(commonTokens);
+    console.log("✅ Price cache pre-warmed successfully");
+  } catch (error) {
+    console.log("⚠️ Failed to pre-warm price cache:", error.message);
+  }
+}
+
+// Pre-warm cache on startup (after a short delay)
+setTimeout(preWarmPriceCache, 5000);
+
+// Clean up expired cache entries every 10 minutes
+setInterval(() => priceManager.clearExpiredCache(), 10 * 60 * 1000);
 
 const runningSweepers = {}; // userKey-chainKey -> true/false
 const processedTransactions = new Set(); // Track processed transaction hashes
@@ -59,26 +296,8 @@ async function getTokenList() {
 
 async function getBatchTokenPricesUSD(symbols) {
   try {
-    // Remove duplicates and filter out empty symbols
-    const uniqueSymbols = [
-      ...new Set(symbols.filter((symbol) => symbol && symbol.trim())),
-    ];
-
-    if (uniqueSymbols.length === 0) {
-      return {};
-    }
-
-    const symbolsParam = uniqueSymbols.join(",");
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?symbols=${symbolsParam}&vs_currencies=usd`
-    );
-    const json = await res.json();
-
-    if (res.ok) {
-      return json;
-    } else {
-      throw new Error(`CoinGecko API error: ${res.status} ${res.statusText}`);
-    }
+    // Use optimized price manager
+    return await priceManager.getPrices(symbols);
   } catch (err) {
     logEvent(`Batch price fetch error: ${err.message}`);
     return {};
@@ -87,21 +306,24 @@ async function getBatchTokenPricesUSD(symbols) {
 
 async function getTokenPriceUSD(symbol) {
   try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${symbol}&vs_currencies=usd`
-    );
-    const json = await res.json();
-
-    if (res.ok) {
-      return json[symbol]?.usd || 0;
-    } else {
-      throw new Error(`CoinGecko API error: ${res.status} ${res.statusText}`);
-    }
+    // Use optimized price manager
+    return await priceManager.getPrice(symbol);
   } catch (err) {
     logEvent(`Price fetch error: ${err.message}`);
     return 0;
   }
 }
+
+// Debug function to monitor price cache performance
+function logPriceCacheStats() {
+  const stats = priceManager.getCacheStats();
+  console.log(
+    `📊 Price Cache Stats: ${stats.size} cached, ${stats.pendingRequests} pending, ${stats.queueLength} queued`
+  );
+}
+
+// Log cache stats every 5 minutes for monitoring
+setInterval(logPriceCacheStats, 5 * 60 * 1000);
 
 // --- Sweeper loop ---
 function startSweeper(

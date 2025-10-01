@@ -66,7 +66,7 @@ function getChainConfigs() {
       rpcUrl: process.env.ETH_RPC,
       usdThreshold: 100,
       nativeUsdThreshold: 70,
-      pollInterval: 20000,
+      pollInterval: 60000, // Increased from 20s to 60s
       testnet: false,
     },
     mantle: {
@@ -74,7 +74,7 @@ function getChainConfigs() {
       chainId: 5000,
       usdThreshold: 100,
       nativeUsdThreshold: 100,
-      pollInterval: 20000,
+      pollInterval: 60000, // Increased from 20s to 60s
       testnet: false,
     },
   };
