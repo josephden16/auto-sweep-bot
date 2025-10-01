@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const MAX_USERS = parseInt(process.env.MAX_USERS) || 3;
-const DATA_DIR = "./data";
+const DATA_DIR = "./";
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const ENCRYPTION_KEY =
   process.env.ENCRYPTION_KEY || "default-key-change-in-production";
