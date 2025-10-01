@@ -84,8 +84,21 @@ async function getTokenPriceUSD(symbol) {
 function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
   const wallet = getWalletFromMnemonic(mnemonic, chainKey);
 
+  const friendlyChainName = config.name
+    .replace(" Testnet", "")
+    .replace(" Sepolia", "")
+    .replace(" Amoy", "");
+  const shortWalletAddress = `${wallet.address.substring(
+    0,
+    6
+  )}...${wallet.address.substring(wallet.address.length - 4)}`;
+  const shortDestAddress = `${destAddress.substring(
+    0,
+    6
+  )}...${destAddress.substring(destAddress.length - 4)}`;
+
   notify(
-    `🚀 Sweeper started on ${config.name} for ${wallet.address} → ${destAddress}`
+    `🎉 Great! I'm now watching your ${friendlyChainName} wallet for funds to collect!\n\n📱 Wallet: ${shortWalletAddress}\n🏦 Funds will go to: ${shortDestAddress}\n\n💫 You'll be notified whenever I find and move funds for you!`
   );
   runningSweepers[chainKey] = true;
 
@@ -285,10 +298,14 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
         );
         if (nativeTxHash) {
           const explorerLink = getExplorerLink(chainKey, nativeTxHash);
+          const friendlyChainName = config.name
+            .replace(" Testnet", "")
+            .replace(" Sepolia", "")
+            .replace(" Amoy", "");
           notify(
-            `💰 Swept native ${config.name} token (~$${nativeValueUSD.toFixed(
+            `💰 Excellent! I just collected $${nativeValueUSD.toFixed(
               2
-            )})\n🔗 ${explorerLink}`
+            )} worth of ${friendlyChainName} tokens for you!\n\n✨ Your funds are safely on their way to your main wallet.\n\n� [View transaction details](${explorerLink})`
           );
           logEvent(
             `[${config.name}] Native sweep tx: ${nativeTxHash} (reserved ${
@@ -307,12 +324,16 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
         const txHash = await sweepToken(wallet, destAddress, token);
         if (txHash) {
           const explorerLink = getExplorerLink(chainKey, txHash);
+          const friendlyChainName = config.name
+            .replace(" Testnet", "")
+            .replace(" Sepolia", "")
+            .replace(" Amoy", "");
           notify(
-            `💰 Swept ${token.amountReadable} ${
+            `🪙 Fantastic! I collected ${token.amountReadable} ${
               token.symbol
-            } (~$${token.valueUSD.toFixed(2)}) on ${
-              config.name
-            }\n🔗 ${explorerLink}`
+            } (worth $${token.valueUSD.toFixed(
+              2
+            )}) from your ${friendlyChainName} wallet!\n\n🎯 Your tokens are now safely in your main wallet.\n\n� [View transaction details](${explorerLink})`
           );
           logEvent(
             `[${config.name}] ERC20 sweep ${token.symbol} tx: ${txHash}`
