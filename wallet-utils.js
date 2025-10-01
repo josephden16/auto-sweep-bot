@@ -11,6 +11,7 @@ const CHAINS = {
     rpc: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://eth-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "ETH",
+    nativeDecimals: 18,
     chainId: 1,
     explorerUrl: "https://etherscan.io/tx/",
   },
@@ -18,6 +19,7 @@ const CHAINS = {
     rpc: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "MATIC",
+    nativeDecimals: 18,
     chainId: 137,
     explorerUrl: "https://polygonscan.com/tx/",
   },
@@ -25,6 +27,7 @@ const CHAINS = {
     rpc: `https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "MNT",
+    nativeDecimals: 18,
     chainId: 5000,
     explorerUrl: "https://explorer.mantle.xyz/tx/",
   },
@@ -36,6 +39,7 @@ const TESTNET_CHAINS = {
     rpc: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://eth-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "ETH",
+    nativeDecimals: 18,
     chainId: 11155111,
     testnet: true,
     explorerUrl: "https://sepolia.etherscan.io/tx/",
@@ -44,6 +48,7 @@ const TESTNET_CHAINS = {
     rpc: `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "MATIC",
+    nativeDecimals: 18,
     chainId: 80002,
     testnet: true,
     explorerUrl: "https://amoy.polygonscan.com/tx/",
@@ -52,6 +57,7 @@ const TESTNET_CHAINS = {
     rpc: `https://mantle-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     alchemy: `https://mantle-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
     nativeSymbol: "MNT",
+    nativeDecimals: 18,
     chainId: 5003,
     testnet: true,
     explorerUrl: "https://explorer.sepolia.mantle.xyz/tx/",
@@ -103,21 +109,39 @@ async function getTokenBalances(chain, address) {
   if (!chainConfig) {
     throw new Error(`Unsupported chain: ${chain}`);
   }
-  const url = `${chainConfig.alchemy}/getTokenBalances/?address=${address}`;
-  const resp = await fetch(url);
+  const url = `${chainConfig.alchemy}`;
+  const resp = await fetch(url, {
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      method: "alchemy_getTokenBalances",
+      params: [address],
+      id: 1,
+    }),
+    method: "POST",
+  });
+
   const data = await resp.json();
 
-  if (!data.tokenBalances) return [];
+  if (!data?.result?.tokenBalances) return [];
 
   const balances = [];
 
-  for (const t of data.tokenBalances) {
+  for (const t of data?.result?.tokenBalances) {
     if (t.tokenBalance === "0") continue; // skip zero balances
 
     // fetch metadata for decimals + symbol
-    const metaUrl = `${chainConfig.alchemy}/getTokenMetadata?contractAddress=${t.contractAddress}`;
-    const metaResp = await fetch(metaUrl);
-    const meta = await metaResp.json();
+    const metaUrl = `${chainConfig.alchemy}`;
+    const metaResp = await fetch(metaUrl, {
+      method: "POST",
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "alchemy_getTokenMetadata",
+        params: [t.contractAddress],
+        id: 1,
+      }),
+    });
+
+    const meta = (await metaResp.json())?.result || {};
 
     balances.push({
       contract: t.contractAddress,
@@ -198,6 +222,45 @@ function isTestnet(chain) {
 }
 
 /**
+ * Format native token balance with correct decimals for the chain
+ */
+function formatNativeBalance(chain, balance) {
+  const chainConfig = getChainConfigWithMode(chain);
+  if (!chainConfig) {
+    throw new Error(`Unsupported chain: ${chain}`);
+  }
+
+  const decimals = chainConfig.nativeDecimals || 18;
+  const symbol = chainConfig.nativeSymbol || "ETH";
+
+  // Use ethers.utils.formatUnits for proper decimal handling
+  const formatted = ethers.utils.formatUnits(balance, decimals);
+
+  return {
+    formatted,
+    symbol,
+    decimals,
+    raw: balance,
+  };
+}
+
+/**
+ * Get native token info for a chain
+ */
+function getNativeTokenInfo(chain) {
+  const chainConfig = getChainConfigWithMode(chain);
+  if (!chainConfig) {
+    throw new Error(`Unsupported chain: ${chain}`);
+  }
+
+  return {
+    symbol: chainConfig.nativeSymbol || "ETH",
+    decimals: chainConfig.nativeDecimals || 18,
+    name: chainConfig.name || "Unknown Chain",
+  };
+}
+
+/**
  * Generate blockchain explorer link for a transaction
  */
 function getExplorerLink(chain, txHash) {
@@ -222,4 +285,6 @@ module.exports = {
   getChainConfigWithMode,
   isTestnetMode,
   getExplorerLink,
+  formatNativeBalance,
+  getNativeTokenInfo,
 };

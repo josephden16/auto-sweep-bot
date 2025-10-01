@@ -5,6 +5,8 @@ A Telegram bot that automatically sweeps native tokens and ERC-20 tokens from a 
 ## Features
 
 - ✅ Multi-chain support (Ethereum, Polygon, Mantle)
+- ✅ **Easily extensible** - Add new chains with minimal configuration
+- ✅ **Smart native token handling** - Automatic decimal formatting per chain
 - ✅ Automatic native token sweeping
 - ✅ ERC-20 token discovery and sweeping
 - ✅ USD value threshold filtering
@@ -236,9 +238,37 @@ Check the logs in `logs/sweeper.log` for detailed error information.
 
 ## Supported Chains
 
-- **Ethereum** (ETH) - Chain ID: 1
-- **Polygon** (MATIC) - Chain ID: 137
-- **Mantle** (MNT) - Chain ID: 5000
+- **Ethereum** (ETH) - Chain ID: 1 / 11155111 (Sepolia)
+- **Polygon** (MATIC) - Chain ID: 137 / 80002 (Amoy)
+- **Mantle** (MNT) - Chain ID: 5000 / 5003 (Sepolia)
+
+## Adding New Chains
+
+The bot is designed to be easily extensible. Adding support for a new blockchain network requires minimal configuration changes.
+
+**Key Benefits:**
+
+- ✅ **Automatic native token handling** - Different decimals supported (8, 18, etc.)
+- ✅ **Smart explorer link generation** - Auto-connects to the right block explorer
+- ✅ **Consistent API** - Same commands work across all chains
+- ✅ **Testnet support** - Add mainnet and testnet configurations
+
+**Quick Example - Adding Arbitrum:**
+
+```javascript
+// Just add to chain configs:
+arbitrum: {
+  nativeSymbol: "ETH",      // Native token symbol
+  nativeDecimals: 18,       // Native token decimals
+  chainId: 42161,           // Chain ID
+  explorerUrl: "https://arbiscan.io/tx/",  // Block explorer
+  // ... RPC config
+}
+```
+
+**📖 Full Guide:** See [ADDING_CHAINS.md](./ADDING_CHAINS.md) for complete instructions.
+
+**🧪 Test Your Changes:** `npm run test-native`
 
 ## Dependencies
 

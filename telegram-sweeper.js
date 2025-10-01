@@ -7,7 +7,10 @@ const { startSweeper, stopAllSweepers, runningSweepers } = require("./sweeper");
 const {
   getWalletFromMnemonic,
   getTokenBalances,
+  getActiveChains,
   isTestnetMode,
+  formatNativeBalance,
+  getNativeTokenInfo,
 } = require("./wallet-utils");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -201,9 +204,9 @@ bot.onText(/^\/discover (.+)/, async (msg, match) => {
   try {
     const wallet = getWalletFromMnemonic(mnemonic, chainKey);
 
-    // Native balance
+    // Native balance - use proper formatting for each chain
     const nativeBalance = await wallet.provider.getBalance(wallet.address);
-    const nativeFormatted = ethers.utils.formatEther(nativeBalance);
+    const nativeInfo = formatNativeBalance(chainKey, nativeBalance);
 
     // ERC20 balances
     const tokens = await getTokenBalances(chainKey, wallet.address);
@@ -211,19 +214,7 @@ bot.onText(/^\/discover (.+)/, async (msg, match) => {
     const modeIndicator = isTestnetMode ? "🧪" : "📡";
     let reply = `🔎 ${modeIndicator} Balances on ${config.name} for ${wallet.address}:\n\n`;
 
-    // Get native symbol from chain config or derive it
-    const nativeSymbol =
-      config.name.includes("Ethereum") || config.name.includes("Sepolia")
-        ? "ETH"
-        : config.name.includes("Polygon") ||
-          config.name.includes("Mumbai") ||
-          config.name.includes("Amoy")
-        ? "MATIC"
-        : config.name.includes("Mantle")
-        ? "MNT"
-        : "ETH";
-
-    reply += `• ${nativeFormatted} ${nativeSymbol} (native)\n`;
+    reply += `• ${nativeInfo.formatted} ${nativeInfo.symbol} (native)\n`;
 
     if (tokens.length) {
       tokens.forEach((t) => {

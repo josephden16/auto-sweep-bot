@@ -8,7 +8,8 @@
     "dev": "nodemon telegram-sweeper.js",
     "test": "node test-config.js",
     "test-mode": "node test-mode-demo.js",
-    "test-explorer": "node test-explorer-links.js"
+    "test-explorer": "node test-explorer-links.js",
+    "test-native": "node test-native-tokens.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",

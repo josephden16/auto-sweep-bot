@@ -12,6 +12,7 @@ const {
 const runningSweepers = {}; // chainKey -> true/false
 
 function logEvent(msg) {
+  console.log(`[${new Date().toISOString()}] ${msg}\n`);
   fs.appendFileSync(
     "logs/sweeper.log",
     `[${new Date().toISOString()}] ${msg}\n`
