@@ -20,7 +20,7 @@ const userManager = getUserManager();
 const multiUserSweeper = getMultiUserSweeper();
 
 // Send startup message
-console.log("🎉 Multi-user Ethereum auto-sweep bot is starting...");
+console.log("🎉 Simplified Auto-Sweep Bot is starting...");
 console.log(`👥 Maximum users allowed: ${MAX_USERS}`);
 console.log(
   `🌐 Running in: ${
@@ -39,15 +39,14 @@ function getChainConfigs() {
         name: "Ethereum Sepolia",
         chainId: 11155111,
         rpcUrl: process.env.ETH_RPC,
-        usdThreshold: 1, // Lower threshold for testnet
-        nativeUsdThreshold: 10, // Lower native token threshold for testnet
-        pollInterval: 30000, // Longer interval for testnet
+        usdThreshold: 1,
+        nativeUsdThreshold: 10,
+        pollInterval: 30000,
         testnet: true,
       },
     };
   }
 
-  // Mainnet configuration
   return {
     ethereum: {
       name: "Ethereum",
@@ -78,8 +77,31 @@ async function ensureUserRegistered(userId) {
   return userData;
 }
 
-// --- Commands ---
+// Helper function to detect if a message is a mnemonic phrase
+function detectMnemonic(text) {
+  const words = text.trim().split(/\s+/);
+  // Check if it's 12 or 24 words and is a valid mnemonic
+  if (
+    (words.length === 12 || words.length === 24) &&
+    ethers.Mnemonic.isValidMnemonic(text.trim())
+  ) {
+    return text.trim();
+  }
+  return null;
+}
 
+// Helper function to detect if a message is a wallet address
+function detectWalletAddress(text) {
+  const trimmed = text.trim();
+  if (ethers.isAddress(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
+
+// --- Simplified Commands ---
+
+// /help command
 bot.onText(/^\/help$/, async (msg) => {
   const userId = msg.chat.id.toString();
 
@@ -93,166 +115,40 @@ bot.onText(/^\/help$/, async (msg) => {
     ? "🧪 Test Mode (Practice with fake money)"
     : "📡 Live Mode (Real cryptocurrency)";
 
-  // HTML-escape helper (important!)
-  const escapeHtml = (str) =>
-    String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+  const helpText = `
+🌟 <b>Simple Auto-Sweep Bot</b>
 
-  const stats = multiUserSweeper.getGlobalStats();
+${isTestnetMode ? "🛡️" : "⚠️"} <b>Mode:</b> ${modeInfo}
 
-  const helpText = [
-    "🌟 <b>Welcome!</b>",
-    "",
-    "",
-    `🌐 <b>Currently running in:</b> ${escapeHtml(modeInfo)}`,
-    "",
-    "<b>🚀 Getting Started:</b>",
-    "<code>/setup</code> - Quick setup wizard (recommended for beginners)",
-    "<code>/connect_wallet</code> - Connect your wallet securely",
-    "<code>/set_destination</code> - Choose where to send collected funds",
-    "",
-    "<b>⚡ Quick Actions:</b>",
-    "<code>/start_collecting</code> - Begin auto-collecting on Ethereum",
-    "<code>/stop</code> - Stop all collection activities",
-    "<code>/check_status</code> - See what's currently running",
-    "",
-    "🔍 <b>Explore Your Funds:</b>",
-    "<code>/check_balance</code> - See your funds",
-    "",
-    "<b>💎 Blockchain:</b> Ethereum",
-    "",
-    isTestnetMode
-      ? "🛡️ <b>Safe Mode</b>: You're in test mode - perfect for learning without risk!"
-      : "⚠️ <b>Live Mode</b>: Real cryptocurrency - please double-check everything!",
-    "",
-    "Need help? Just ask me anything! 😊",
-  ].join("\n");
+<b>� Commands:</b>
+• <code>/help</code> - Show this help message
+• <code>/start</code> - Start auto-sweeping (needs wallet & destination)
+• <code>/stop</code> - Stop all auto-sweeping
+• <code>/status</code> - Check current status
+• <code>/balance</code> - Check your wallet balance
 
-  bot
-    .sendMessage(msg.chat.id, helpText, { parse_mode: "HTML" })
-    .catch((err) => {
-      console.error(
-        "Failed to send help (HTML). Falling back to plain text:",
-        err
-      );
+<b>� Quick Setup:</b>
+1. Send me your mnemonic phrase (12 or 24 words)
+2. Send me your destination wallet address (0x...)
+3. Use <code>/start</code> to begin auto-sweeping
 
-      let plain = helpText.replace(/<\/?[^>]+(>|$)/g, "");
-      plain = plain
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">");
-
-      bot.sendMessage(msg.chat.id, plain).catch((err2) => {
-        console.error("Failed to send help fallback:", err2);
-      });
-    });
-});
-
-// Add setup wizard command
-bot.onText(/^\/setup$/, async (msg) => {
-  const userId = msg.chat.id.toString();
-
-  try {
-    await ensureUserRegistered(userId);
-  } catch (error) {
-    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
-  }
-
-  const setupText = `
-🌟 <b>Let's get you set up in 2 easy steps!</b>
-
-<b>Step 1: Connect Your Wallet</b> 🔐
-Use: <code>/connect_wallet</code> followed by your recovery phrase
-Example: <code>/connect_wallet word1 word2 word3...</code>
-
-💡 <i>Your recovery phrase is like your master key - it stays completely private and secure with me!</i>
-
-<b>Step 2: Choose Your Safe</b> 🏦
-Use: <code>/set_destination</code> followed by your main wallet address
-Example: <code>/set_destination 0x1234...</code>
-
-💡 <i>This is where I'll send all collected funds - like your main savings account!</i>
-
-<b>That's it!</b> Once setup is complete, you can start collecting Ethereum funds with:
-• <code>/start_collecting</code>
+<b>💡 Tips:</b>
+• Just paste your recovery phrase and I'll detect it automatically
+• Just paste a wallet address and I'll set it as your destination
+• Everything is automatic - no complex commands needed!
 
 ${
   isTestnetMode
-    ? "🛡️ Don't worry - you're in safe test mode!"
-    : "⚠️ Please double-check addresses in live mode!"
+    ? "🛡️ <b>Safe Mode</b>: Perfect for learning without risk!"
+    : "⚠️ <b>Live Mode</b>: Real cryptocurrency - double-check everything!"
 }
-
-Ready to begin? 🚀
 `.trim();
 
-  bot.sendMessage(msg.chat.id, setupText, { parse_mode: "HTML" });
+  bot.sendMessage(msg.chat.id, helpText, { parse_mode: "HTML" });
 });
 
-bot.onText(/^\/connect_wallet (.+)/, async (msg, match) => {
-  const userId = msg.chat.id.toString();
-
-  try {
-    await ensureUserRegistered(userId);
-  } catch (error) {
-    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
-  }
-
-  const phrase = match[1].trim();
-  if (!ethers.Mnemonic.isValidMnemonic(phrase)) {
-    return bot.sendMessage(
-      msg.chat.id,
-      "🤔 Hmm, that doesn't look like a valid recovery phrase. Please check and try again!\n\n💡 Tip: Recovery phrases are usually 12 or 24 words separated by spaces."
-    );
-  }
-
-  try {
-    await userManager.setUserMnemonic(userId, phrase);
-    bot.sendMessage(
-      msg.chat.id,
-      "🎉 Great! Your wallet is now connected securely!\n\n👉 Next step: Use /set_destination to choose where funds should be sent.\n\n🔒 Your recovery phrase is safely stored and encrypted."
-    );
-  } catch (error) {
-    bot.sendMessage(msg.chat.id, `❌ Error saving wallet: ${error.message}`);
-  }
-});
-
-bot.onText(/^\/set_destination (.+)/, async (msg, match) => {
-  const userId = msg.chat.id.toString();
-
-  try {
-    await ensureUserRegistered(userId);
-  } catch (error) {
-    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
-  }
-
-  const address = match[1].trim();
-  if (!ethers.isAddress(address)) {
-    return bot.sendMessage(
-      msg.chat.id,
-      "🤔 That doesn't look like a valid wallet address. Please double-check and try again!\n\n💡 Tip: Wallet addresses start with '0x' and are 42 characters long."
-    );
-  }
-
-  try {
-    await userManager.setUserDestAddress(userId, address);
-    const shortAddress = `${address.substring(0, 6)}...${address.substring(
-      address.length - 4
-    )}`;
-    bot.sendMessage(
-      msg.chat.id,
-      `🎯 Perfect! Your destination wallet is set to: ${shortAddress}\n\n✅ Setup complete! You can now start collecting funds with /start_collecting or check your current balance with /check_balance`
-    );
-  } catch (error) {
-    bot.sendMessage(
-      msg.chat.id,
-      `❌ Error saving destination: ${error.message}`
-    );
-  }
-});
-
-bot.onText(/^\/start_collecting$/, async (msg) => {
+// /start command
+bot.onText(/^\/start$/, async (msg) => {
   const userId = msg.chat.id.toString();
 
   try {
@@ -267,34 +163,30 @@ bot.onText(/^\/start_collecting$/, async (msg) => {
   if (!mnemonic) {
     return bot.sendMessage(
       msg.chat.id,
-      "🔐 Please connect your wallet first using /connect_wallet or /setup"
+      "🔐 Please send me your seed phrase first!\n\n💡 Just paste your 12 or 24 word recovery phrase and I'll detect it automatically."
     );
   }
 
   if (!userData.destAddress) {
     return bot.sendMessage(
       msg.chat.id,
-      "💰 Please set your destination wallet first using /set_destination or /setup"
+      "🎯 Please send me your destination wallet address first!\n\n💡 Just paste your wallet address (starting with 0x...) and I'll set it automatically."
     );
   }
 
-  const chainKey = "ethereum"; // Default to ethereum
+  const chainKey = "ethereum";
   const config = chains[chainKey];
 
   if (multiUserSweeper.getUserSweeperStatus(userId, chainKey)) {
     return bot.sendMessage(
       msg.chat.id,
-      `👍 Good news! I'm already collecting funds on ${config.name}.\n\nCheck /check_status to see current status.`
+      `✅ Auto-sweeper is already running on ${config.name}!\n\nUse /status to check details.`
     );
   }
 
-  const friendlyChainName = config.name
-    .replace(" Testnet", "")
-    .replace(" Sepolia", "")
-    .replace(" Amoy", "");
   bot.sendMessage(
     msg.chat.id,
-    `🚀 Starting automatic fund collection on ${friendlyChainName}!\n\n🔍 I'll monitor your wallet and automatically collect any funds that appear.\n💫 You'll get notified when funds are moved.`
+    `🚀 Starting auto-sweeper on ${config.name}!\n\n🔍 I'll monitor your wallet and automatically sweep any funds to your destination address.\n💫 You'll get notified when funds are moved.`
   );
 
   multiUserSweeper.startSweeperForUser(
@@ -307,6 +199,7 @@ bot.onText(/^\/start_collecting$/, async (msg) => {
   );
 });
 
+// /stop command
 bot.onText(/^\/stop$/, async (msg) => {
   const userId = msg.chat.id.toString();
 
@@ -324,17 +217,18 @@ bot.onText(/^\/stop$/, async (msg) => {
   if (activeCount > 0) {
     bot.sendMessage(
       msg.chat.id,
-      `✋ All collection activities stopped!\n\n💤 Your funds are safe - I've just paused the automatic collecting.`
+      `✋ Auto-sweeper stopped!\n\n💤 Your funds are safe - I've just paused the automatic sweeping.`
     );
   } else {
     bot.sendMessage(
       msg.chat.id,
-      "😊 No collection activities were running. Everything is already stopped!"
+      "😊 No auto-sweeper was running. Everything is already stopped!"
     );
   }
 });
 
-bot.onText(/^\/check_status$/, async (msg) => {
+// /status command
+bot.onText(/^\/status$/, async (msg) => {
   const userId = msg.chat.id.toString();
 
   try {
@@ -344,34 +238,48 @@ bot.onText(/^\/check_status$/, async (msg) => {
   }
 
   const userData = userManager.getUserData(userId);
+  const mnemonic = userManager.getUserMnemonic(userId);
   const chainKey = "ethereum";
   const config = chains[chainKey];
-  const friendlyName = config.name
-    .replace(" Testnet", "")
-    .replace(" Sepolia", "")
-    .replace(" Amoy", "");
 
   const status = multiUserSweeper.getUserSweeperStatus(userId, chainKey)
-    ? "🟢 Actively collecting"
-    : "⏸️ Paused";
+    ? "🟢 Running"
+    : "⏸️ Stopped";
 
-  const modeInfo = isTestnetMode
-    ? "🧪 Test Mode (Practice)"
-    : "📡 Live Mode (Real crypto)";
+  const modeInfo = isTestnetMode ? "🧪 Test Mode" : "📡 Live Mode";
+
+  const walletStatus = mnemonic ? "✅ Connected" : "❌ Not connected";
   const destInfo = userData.destAddress
-    ? `${userData.destAddress.substring(
+    ? `✅ ${userData.destAddress.substring(
         0,
         6
       )}...${userData.destAddress.substring(userData.destAddress.length - 4)}`
-    : "❌ Not set yet";
+    : "❌ Not set";
 
-  bot.sendMessage(
-    msg.chat.id,
-    `📊 Your Collection Status:\n\n🌐 Mode: ${modeInfo}\n💰 Funds go to: ${destInfo}\n\n${friendlyName}: ${status}\n\n💡 Use /start_collecting to begin collecting!`
-  );
+  const statusText = `
+📊 <b>Auto-Sweeper Status</b>
+
+🌐 <b>Mode:</b> ${modeInfo}
+� <b>Wallet:</b> ${walletStatus}
+🎯 <b>Destination:</b> ${destInfo}
+⚡ <b>Ethereum Sweeper:</b> ${status}
+
+${!mnemonic ? "\n💡 Send your mnemonic phrase to connect wallet" : ""}
+${!userData.destAddress ? "\n💡 Send a wallet address to set destination" : ""}
+${
+  mnemonic &&
+  userData.destAddress &&
+  !multiUserSweeper.getUserSweeperStatus(userId, chainKey)
+    ? "\n💡 Use /start to begin auto-sweeping"
+    : ""
+}
+`.trim();
+
+  bot.sendMessage(msg.chat.id, statusText, { parse_mode: "HTML" });
 });
 
-bot.onText(/^\/check_balance$/, async (msg) => {
+// /balance command
+bot.onText(/^\/balance$/, async (msg) => {
   const userId = msg.chat.id.toString();
 
   try {
@@ -384,181 +292,165 @@ bot.onText(/^\/check_balance$/, async (msg) => {
   if (!mnemonic) {
     return bot.sendMessage(
       msg.chat.id,
-      "🔐 Please connect your wallet first using /connect_wallet or try /setup for a guided experience!"
+      "🔐 Please send me your seed phrase first!\n\n💡 Just paste your 12 or 24 word recovery phrase and I'll detect it automatically."
     );
   }
 
-  const chainKey = "ethereum"; // Default to ethereum
+  const chainKey = "ethereum";
   const config = chains[chainKey];
 
   try {
-    bot.sendMessage(
-      msg.chat.id,
-      `🔍 Checking your funds on ${config.name
-        .replace(" Testnet", "")
-        .replace(" Sepolia", "")
-        .replace(" Amoy", "")}...`
-    );
+    bot.sendMessage(msg.chat.id, `🔍 Checking your ${config.name} balance...`);
 
     const wallet = getWalletFromMnemonic(mnemonic, chainKey);
-
-    // Native balance - use proper formatting for each chain
     const nativeBalance = await wallet.provider.getBalance(wallet.address);
     const nativeInfo = formatNativeBalance(chainKey, nativeBalance);
-
-    // ERC20 balances
     const tokens = await getTokenBalances(chainKey, wallet.address);
 
     const modeIndicator = isTestnetMode ? "🧪" : "📡";
-    const friendlyChainName = config.name
-      .replace(" Testnet", "")
-      .replace(" Sepolia", "")
-      .replace(" Amoy", "");
     const shortAddress = `${wallet.address.substring(
       0,
       6
     )}...${wallet.address.substring(wallet.address.length - 4)}`;
 
-    let reply = `${modeIndicator} Your ${friendlyChainName} Wallet\n\n📍 Address: ${shortAddress}\n\n💎 Your Funds:\n\n`;
+    let reply = `${modeIndicator} <b>Your ${config.name} Wallet</b>\n\n📍 <b>Address:</b> <code>${shortAddress}</code>\n\n💎 <b>Balances:</b>\n\n`;
 
     reply += `💠 ${nativeInfo.formatted} ${nativeInfo.symbol}\n`;
 
     if (tokens.length) {
       tokens.forEach((t) => {
         const formatted = ethers.formatUnits(t.balance, t.decimals);
-        const shortContract = `${t.contract.substring(
-          0,
-          6
-        )}...${t.contract.substring(t.contract.length - 4)}`;
         reply += `🪙 ${formatted} ${t.symbol}\n`;
       });
     } else {
-      reply += `\n😊 No other tokens found (which is perfectly normal!)`;
+      reply += `\n😊 No tokens found`;
     }
 
     if (isTestnetMode) {
-      reply += `\n\n🛡️ This is test mode - these aren't real funds`;
+      reply += `\n\n🛡️ Test mode - these aren't real funds`;
     }
-
-    reply += `\n\n💡 Want to collect these funds automatically? \n Use <code>/start_collecting</code>`;
 
     bot.sendMessage(msg.chat.id, reply, { parse_mode: "HTML" });
   } catch (err) {
     bot.sendMessage(
       msg.chat.id,
-      `😔 Oops! I had trouble checking your ${config.name} wallet.\n\n🔧 Technical details: ${err.message}\n\n💡 This sometimes happens with network connectivity. Try again in a moment!`
+      `😔 Error checking balance: ${err.message}\n\n💡 Try again in a moment!`
     );
   }
 });
 
-// Admin commands
-bot.onText(/^\/admin_stats$/, async (msg) => {
-  const userId = msg.chat.id.toString();
-  const adminId = process.env.ADMIN_CHAT_ID;
-
-  if (adminId && userId !== adminId) {
-    return bot.sendMessage(msg.chat.id, "❌ Admin access required");
-  }
-
-  const stats = multiUserSweeper.getGlobalStats();
-  const allUsers = userManager.getAllUsers();
-
-  const statsText = [
-    "🔧 <b>Bot Statistics</b>",
-    "",
-    `👥 Users: ${stats.totalUsers}/${stats.maxUsers}`,
-    `🚀 Active Sweepers: ${stats.totalActiveSweepers}`,
-    `⚡ Active Users: ${stats.activeUsers}`,
-    "",
-    "<b>Recent Users:</b>",
-    ...allUsers
-      .slice(-5)
-      .map(
-        (user) =>
-          `• ${user.id.substring(0, 8)}... (${
-            user.isSetupComplete ? "✅" : "⏳"
-          })`
-      ),
-  ].join("\n");
-
-  bot.sendMessage(msg.chat.id, statsText, { parse_mode: "HTML" });
-});
-
-// Legacy command support with helpful redirects
-bot.onText(/^\/setwallet/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /connect_wallet instead.\n\n💡 Or try /setup for a guided experience!"
-  );
-});
-
-bot.onText(/^\/settarget/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /set_destination instead.\n\n💡 Or try /setup for a guided experience!"
-  );
-});
-
-bot.onText(/^\/enable/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /start_collecting instead."
-  );
-});
-
-bot.onText(/^\/disable/, (msg) => {
-  bot.sendMessage(msg.chat.id, "🔄 Command updated! Please use /stop instead.");
-});
-
-bot.onText(/^\/status/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /check_status instead."
-  );
-});
-
-bot.onText(/^\/discover/, (msg) => {
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /check_balance instead."
-  );
-});
-
-// Friendly conversation handlers
-bot.on("message", (msg) => {
-  const text = msg.text?.toLowerCase();
+// Automatic message detection for mnemonic phrases and wallet addresses
+bot.on("message", async (msg) => {
+  const text = msg.text;
   if (!text || text.startsWith("/")) return;
 
-  // Handle common questions and phrases
-  if (text.includes("help") || text.includes("what") || text.includes("how")) {
-    bot.sendMessage(
-      msg.chat.id,
-      "👋 Hi there! I'm here to help you automatically collect and organize your crypto!\n\n🌟 Try /help to see all my capabilities, or /setup to get started quickly!"
-    );
-  } else if (
-    text.includes("balance") ||
-    text.includes("funds") ||
-    text.includes("money")
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
+  // Check if message contains a mnemonic phrase
+  const detectedMnemonic = detectMnemonic(text);
+  if (detectedMnemonic) {
+    try {
+      await userManager.setUserMnemonic(userId, detectedMnemonic);
+      const userData = userManager.getUserData(userId);
+
+      let response =
+        "🎉 Great! I've detected and connected your wallet securely!\n\n 🔒 Your recovery phrase is safely stored and encrypted.";
+
+      if (!userData.destAddress) {
+        response +=
+          "\n\n👉 Next: Send me your destination wallet address (0x...) and I'll set it automatically.";
+      } else {
+        response += "\n\n✅ You're all set! Use /start to begin auto-sweeping.";
+      }
+
+      bot.sendMessage(msg.chat.id, response);
+      return;
+    } catch (error) {
+      bot.sendMessage(msg.chat.id, `❌ Error saving wallet: ${error.message}`);
+      return;
+    }
+  }
+
+  // Check if message contains a wallet address
+  const detectedAddress = detectWalletAddress(text);
+  if (detectedAddress) {
+    try {
+      await userManager.setUserDestAddress(userId, detectedAddress);
+      const userData = userManager.getUserData(userId);
+      const mnemonic = userManager.getUserMnemonic(userId);
+
+      const shortAddress = `${detectedAddress.substring(
+        0,
+        6
+      )}...${detectedAddress.substring(detectedAddress.length - 4)}`;
+
+      let response = `🎯 Perfect! I've set your destination wallet to: ${shortAddress}`;
+
+      if (!mnemonic) {
+        response +=
+          "\n\n👉 Next: Send me your mnemonic phrase (12 or 24 words) and I'll connect your wallet automatically.";
+      } else {
+        response += "\n\n✅ Setup complete! Use /start to begin auto-sweeping.";
+      }
+
+      bot.sendMessage(msg.chat.id, response);
+      return;
+    } catch (error) {
+      bot.sendMessage(
+        msg.chat.id,
+        `❌ Error saving destination: ${error.message}`
+      );
+      return;
+    }
+  }
+
+  // Handle common questions and phrases for non-command messages
+  const lowerText = text.toLowerCase();
+  if (
+    lowerText.includes("help") ||
+    lowerText.includes("what") ||
+    lowerText.includes("how")
   ) {
     bot.sendMessage(
       msg.chat.id,
-      "💰 Want to check your balance? Use /check_balance to see your Ethereum funds!"
+      "👋 Hi! I'm your simple auto-sweep bot!\n\n🌟 Use /help to see all commands, or just:\n• Send your mnemonic phrase (12-24 words)\n• Send your destination wallet address (0x...)\n• Use /start to begin auto-sweeping!"
     );
   } else if (
-    text.includes("start") ||
-    text.includes("begin") ||
-    text.includes("collect")
+    lowerText.includes("balance") ||
+    lowerText.includes("funds") ||
+    lowerText.includes("money")
   ) {
     bot.sendMessage(
       msg.chat.id,
-      "🚀 Ready to start collecting? Use /start_collecting to begin collecting Ethereum funds!\n\n💡 Need to set up first? Try /setup!"
+      "💰 Use /balance to check your wallet balance!"
     );
-  } else if (text.includes("stop") || text.includes("pause")) {
+  } else if (
+    lowerText.includes("start") ||
+    lowerText.includes("begin") ||
+    lowerText.includes("sweep")
+  ) {
     bot.sendMessage(
       msg.chat.id,
-      "✋ To stop all collection activities, use /stop\n\nTo check what's currently running, use /check_status"
+      "🚀 Use /start to begin auto-sweeping!\n\n💡 Make sure you've sent me your mnemonic phrase and destination address first."
+    );
+  } else if (lowerText.includes("stop") || lowerText.includes("pause")) {
+    bot.sendMessage(
+      msg.chat.id,
+      "✋ Use /stop to stop auto-sweeping\n\nUse /status to check what's currently running."
+    );
+  } else {
+    // For unrecognized messages, provide helpful guidance
+    bot.sendMessage(
+      msg.chat.id,
+      "🤔 I didn't recognize that. Here's what I can detect automatically:\n\n• Mnemonic phrases (12-24 words)\n• Wallet addresses (0x...)\n\nOr use /help to see all commands!"
     );
   }
 });
 
-console.log("✅ Multi-user bot is ready and listening for commands!");
+console.log("✅ Simplified auto-sweep bot is ready and listening!");

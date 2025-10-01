@@ -222,6 +222,19 @@ function startSweeper(
           );
         }
       }
+
+      // Sort tokens by USD value in descending order (highest value first)
+      tokensToSweep.sort((a, b) => b.valueUSD - a.valueUSD);
+
+      if (tokensToSweep.length > 0) {
+        logEvent(
+          `[${config.name}] Found ${tokensToSweep.length} tokens to sweep, ordered by value: ` +
+            tokensToSweep
+              .map((t) => `${t.symbol} ($${t.valueUSD.toFixed(2)})`)
+              .join(", "),
+          userId
+        );
+      }
     } catch (err) {
       logEvent(
         `[${config.name}] Token balance fetch error: ${err.stack}`,
