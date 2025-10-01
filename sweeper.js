@@ -360,22 +360,45 @@ function startSweeper(
   )}...${destAddress.substring(destAddress.length - 4)}`;
 
   notify(
-    `🎉 Great! I'm now watching your ${friendlyChainName} wallet for funds to collect!\n\n📱 Wallet: ${shortWalletAddress}\n🏦 Funds will go to: ${shortDestAddress}\n\n💫 You'll be notified whenever I find and move funds for you!`
+    `🎉 Great! I'm now watching your ${friendlyChainName} wallet for funds to collect!\n\n📱 Wallet: ${shortWalletAddress}\n🏦 Funds will go to: ${shortDestAddress}\n\n� Starting immediate sweep check...\n�💫 You'll be notified whenever I find and move funds for you!`
   );
   runningSweepers[userChainKey] = true;
   processingTransactions[userChainKey] = false; // Initialize processing state
 
+  // Flag to force immediate execution on first run
+  let isFirstRun = true;
+
+  // Helper function to schedule next loop iteration
+  function scheduleNextLoop() {
+    if (isFirstRun) {
+      isFirstRun = false;
+      logEvent(
+        `[${config.name}] ✅ Immediate sweep check completed for user ${userId}`,
+        userId
+      );
+    }
+    setTimeout(loop, config.pollInterval || 60000);
+  }
+
   async function loop() {
     if (!runningSweepers[userChainKey]) return;
 
-    // Check if transactions are currently being processed
-    if (processingTransactions[userChainKey]) {
+    // Check if transactions are currently being processed (skip only if not first run)
+    if (processingTransactions[userChainKey] && !isFirstRun) {
       logEvent(
         `[${config.name}] Transactions still processing, skipping this cycle`,
         userId
       );
-      setTimeout(loop, config.pollInterval || 20000);
+      scheduleNextLoop();
       return;
+    }
+
+    // Log immediate execution for first run
+    if (isFirstRun) {
+      logEvent(
+        `[${config.name}] 🚀 Starting immediate sweep check for user ${userId}`,
+        userId
+      );
     }
 
     // Check wallet native balance first to detect dust
@@ -387,7 +410,7 @@ function startSweeper(
         `[${config.name}] Failed to check wallet balance: ${err.message}`,
         userId
       );
-      setTimeout(loop, config.pollInterval || 20000);
+      scheduleNextLoop();
       return;
     }
 
@@ -480,7 +503,7 @@ function startSweeper(
       );
 
       // Skip this iteration but continue monitoring
-      setTimeout(loop, config.pollInterval || 20000);
+      scheduleNextLoop();
       return;
     }
 
@@ -495,7 +518,7 @@ function startSweeper(
           `Skipping all operations until funded.`
       );
 
-      setTimeout(loop, config.pollInterval || 20000);
+      scheduleNextLoop();
       return;
     }
 
@@ -658,7 +681,7 @@ function startSweeper(
       processingTransactions[userChainKey] = false;
     }
 
-    setTimeout(loop, config.pollInterval || 60 * 1000);
+    scheduleNextLoop();
   }
 
   // Start the loop
