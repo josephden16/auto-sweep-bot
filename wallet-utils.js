@@ -14,6 +14,7 @@ const CHAINS = {
     nativeDecimals: 18,
     chainId: 1,
     explorerUrl: "https://etherscan.io/tx/",
+    nativeGasLimit: 21000,
   },
   polygon: {
     rpc: `https://polygon-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
@@ -22,6 +23,7 @@ const CHAINS = {
     nativeDecimals: 18,
     chainId: 137,
     explorerUrl: "https://polygonscan.com/tx/",
+    nativeGasLimit: 21000,
   },
   mantle: {
     rpc: `https://mantle-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
@@ -30,6 +32,7 @@ const CHAINS = {
     nativeDecimals: 18,
     chainId: 5000,
     explorerUrl: "https://explorer.mantle.xyz/tx/",
+    nativeGasLimit: 50000000, // Higher gas limit for Mantle
   },
 };
 
@@ -43,6 +46,7 @@ const TESTNET_CHAINS = {
     chainId: 11155111,
     testnet: true,
     explorerUrl: "https://sepolia.etherscan.io/tx/",
+    nativeGasLimit: 21000,
   },
   polygon: {
     rpc: `https://polygon-amoy.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
@@ -52,6 +56,7 @@ const TESTNET_CHAINS = {
     chainId: 80002,
     testnet: true,
     explorerUrl: "https://amoy.polygonscan.com/tx/",
+    nativeGasLimit: 21000,
   },
   mantle: {
     rpc: `https://mantle-sepolia.g.alchemy.com/v2/${ALCHEMY_API_KEY}`,
@@ -61,6 +66,7 @@ const TESTNET_CHAINS = {
     chainId: 5003,
     testnet: true,
     explorerUrl: "https://explorer.sepolia.mantle.xyz/tx/",
+    nativeGasLimit: 50000000, // Higher gas limit for Mantle
   },
 };
 
@@ -383,7 +389,16 @@ async function sweepNative(wallet, dest, chain, gasReserve = null) {
   if (balance === 0n) return null;
 
   const gasPricing = await getOptimalGasPricing(wallet.provider);
-  const gasLimit = 21000n;
+
+  // Get chain-specific gas limit, fallback to 21000 if not defined
+  const chainConfig = getChainConfig(chain);
+  const gasLimit = BigInt(chainConfig?.nativeGasLimit || 21000);
+
+  console.log(
+    `🔧 [${chain}] Using gas limit: ${gasLimit.toString()} (chain config: ${
+      chainConfig?.nativeGasLimit || "default 21000"
+    })`
+  );
 
   // Calculate native transfer cost
   let nativeTransferCost;

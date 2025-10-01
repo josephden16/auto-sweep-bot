@@ -29,7 +29,11 @@ console.log(
       : "📡 Live Mode (real cryptocurrency)"
   }`
 );
-console.log(`💎 Ready to help with: Ethereum`);
+
+const chainNames = Object.values(getChainConfigs()).map((config) =>
+  config.name.replace(" Sepolia", "").replace(" Amoy", "")
+);
+console.log(`💎 Ready to help with: ${chainNames.join(", ")}`);
 
 // --- Chain configs based on TEST_MODE ---
 function getChainConfigs() {
@@ -44,6 +48,14 @@ function getChainConfigs() {
         pollInterval: 30000,
         testnet: true,
       },
+      mantle: {
+        name: "Mantle Sepolia",
+        chainId: 5003,
+        usdThreshold: 0.1,
+        nativeUsdThreshold: 0.1,
+        pollInterval: 30000,
+        testnet: true,
+      },
     };
   }
 
@@ -52,8 +64,16 @@ function getChainConfigs() {
       name: "Ethereum",
       chainId: 1,
       rpcUrl: process.env.ETH_RPC,
-      usdThreshold: 10,
-      nativeUsdThreshold: 5,
+      usdThreshold: 100,
+      nativeUsdThreshold: 70,
+      pollInterval: 20000,
+      testnet: false,
+    },
+    mantle: {
+      name: "Mantle",
+      chainId: 5000,
+      usdThreshold: 100,
+      nativeUsdThreshold: 100,
       pollInterval: 20000,
       testnet: false,
     },
@@ -97,6 +117,104 @@ function detectWalletAddress(text) {
     return trimmed;
   }
   return null;
+}
+
+// Helper function to start sweepers on all chains
+function startSweeperForAllChains(userId, mnemonic, destAddress) {
+  const chainKeys = Object.keys(chains);
+  const startedChains = [];
+  const failedChains = [];
+
+  for (const chainKey of chainKeys) {
+    try {
+      const config = chains[chainKey];
+      const success = multiUserSweeper.startSweeperForUser(
+        userId,
+        chainKey,
+        config,
+        mnemonic,
+        destAddress,
+        (msg) => bot.sendMessage(userId, msg)
+      );
+
+      if (success) {
+        startedChains.push(
+          config.name.replace(" Sepolia", "").replace(" Amoy", "")
+        );
+      } else {
+        failedChains.push(
+          config.name.replace(" Sepolia", "").replace(" Amoy", "")
+        );
+      }
+    } catch (error) {
+      console.error(`Failed to start sweeper on ${chainKey}:`, error);
+      failedChains.push(
+        chains[chainKey].name.replace(" Sepolia", "").replace(" Amoy", "")
+      );
+    }
+  }
+
+  return { startedChains, failedChains };
+}
+
+// Helper function to stop sweepers on all chains
+function stopSweeperForAllChains(userId) {
+  return multiUserSweeper.stopAllSweepersForUser(userId);
+}
+
+// Helper function to get status across all chains
+function getMultiChainStatus(userId) {
+  const chainKeys = Object.keys(chains);
+  const statusByChain = {};
+
+  for (const chainKey of chainKeys) {
+    const config = chains[chainKey];
+    const friendlyName = config.name
+      .replace(" Sepolia", "")
+      .replace(" Amoy", "");
+    const isActive = multiUserSweeper.getUserSweeperStatus(userId, chainKey);
+    statusByChain[friendlyName] = isActive;
+  }
+
+  return statusByChain;
+}
+
+// Helper function to check balances across all chains
+async function checkBalancesAllChains(mnemonic) {
+  const chainKeys = Object.keys(chains);
+  const balancesByChain = {};
+
+  for (const chainKey of chainKeys) {
+    try {
+      const config = chains[chainKey];
+      const friendlyName = config.name
+        .replace(" Sepolia", "")
+        .replace(" Amoy", "");
+
+      const wallet = getWalletFromMnemonic(mnemonic, chainKey);
+      const nativeBalance = await wallet.provider.getBalance(wallet.address);
+      const tokens = await getTokenBalances(chainKey, wallet.address);
+
+      const nativeInfo = formatNativeBalance(chainKey, nativeBalance);
+
+      balancesByChain[friendlyName] = {
+        native: nativeInfo,
+        tokens: tokens,
+        chainKey: chainKey,
+      };
+    } catch (error) {
+      console.error(`Failed to check balance on ${chainKey}:`, error);
+      const friendlyName = chains[chainKey].name
+        .replace(" Sepolia", "")
+        .replace(" Amoy", "");
+      balancesByChain[friendlyName] = {
+        error: error.message,
+        chainKey: chainKey,
+      };
+    }
+  }
+
+  return balancesByChain;
 }
 
 // --- Simplified Commands ---
@@ -174,29 +292,45 @@ bot.onText(/^\/start$/, async (msg) => {
     );
   }
 
-  const chainKey = "ethereum";
-  const config = chains[chainKey];
+  // Check if any sweepers are already running
+  const statusByChain = getMultiChainStatus(userId);
+  const activeChains = Object.entries(statusByChain)
+    .filter(([_, isActive]) => isActive)
+    .map(([chainName, _]) => chainName);
 
-  if (multiUserSweeper.getUserSweeperStatus(userId, chainKey)) {
+  if (activeChains.length > 0) {
     return bot.sendMessage(
       msg.chat.id,
-      `✅ Auto-sweeper is already running on ${config.name}!\n\nUse /status to check details.`
+      `✅ Auto-sweepers are already running on: ${activeChains.join(
+        ", "
+      )}\n\nUse /status to check details.`
     );
   }
 
   bot.sendMessage(
     msg.chat.id,
-    `🚀 Starting auto-sweeper on ${config.name}!\n\n🔍 I'll monitor your wallet and automatically sweep any funds to your destination address.\n💫 You'll get notified when funds are moved.`
+    `🚀 Starting auto-sweepers on all supported chains!\n\n🔍 I'll monitor your wallets and automatically sweep any funds to your destination address.\n💫 You'll get notified when funds are moved.`
   );
 
-  multiUserSweeper.startSweeperForUser(
+  const { startedChains, failedChains } = startSweeperForAllChains(
     userId,
-    chainKey,
-    config,
     mnemonic,
-    userData.destAddress,
-    (event) => bot.sendMessage(msg.chat.id, event)
+    userData.destAddress
   );
+
+  let statusMessage = "";
+  if (startedChains.length > 0) {
+    statusMessage += `✅ Successfully started on: ${startedChains.join(", ")}`;
+  }
+
+  if (failedChains.length > 0) {
+    if (statusMessage) statusMessage += "\n";
+    statusMessage += `⚠️ Failed to start on: ${failedChains.join(", ")}`;
+  }
+
+  if (statusMessage) {
+    bot.sendMessage(msg.chat.id, statusMessage);
+  }
 });
 
 // /stop command
@@ -209,20 +343,24 @@ bot.onText(/^\/stop$/, async (msg) => {
     return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
   }
 
-  const activeSweepers = multiUserSweeper.getUserActiveSweepers(userId);
-  const activeCount = activeSweepers.length;
+  const statusByChain = getMultiChainStatus(userId);
+  const activeChains = Object.entries(statusByChain)
+    .filter(([_, isActive]) => isActive)
+    .map(([chainName, _]) => chainName);
 
-  multiUserSweeper.stopAllSweepersForUser(userId);
+  const stoppedCount = stopSweeperForAllChains(userId);
 
-  if (activeCount > 0) {
+  if (activeChains.length > 0) {
     bot.sendMessage(
       msg.chat.id,
-      `✋ Auto-sweeper stopped!\n\n💤 Your funds are safe - I've just paused the automatic sweeping.`
+      `✋ Auto-sweepers stopped on: ${activeChains.join(
+        ", "
+      )}\n\n💤 Your funds are safe - I've just paused the automatic sweeping on all chains.`
     );
   } else {
     bot.sendMessage(
       msg.chat.id,
-      "😊 No auto-sweeper was running. Everything is already stopped!"
+      "😊 No auto-sweepers were running. Everything is already stopped!"
     );
   }
 });
@@ -239,13 +377,8 @@ bot.onText(/^\/status$/, async (msg) => {
 
   const userData = userManager.getUserData(userId);
   const mnemonic = userManager.getUserMnemonic(userId);
-  const chainKey = "ethereum";
-  const config = chains[chainKey];
 
-  const status = multiUserSweeper.getUserSweeperStatus(userId, chainKey)
-    ? "🟢 Running"
-    : "⏸️ Stopped";
-
+  const statusByChain = getMultiChainStatus(userId);
   const modeInfo = isTestnetMode ? "🧪 Test Mode" : "📡 Live Mode";
 
   const walletStatus = mnemonic ? "✅ Connected" : "❌ Not connected";
@@ -256,21 +389,30 @@ bot.onText(/^\/status$/, async (msg) => {
       )}...${userData.destAddress.substring(userData.destAddress.length - 4)}`
     : "❌ Not set";
 
+  // Build chain status string
+  let chainStatusText = "";
+  for (const [chainName, isActive] of Object.entries(statusByChain)) {
+    const status = isActive ? "🟢 Running" : "⏸️ Stopped";
+    chainStatusText += `⚡ <b>${chainName} Sweeper:</b> ${status}\n`;
+  }
+
+  const activeCount = Object.values(statusByChain).filter(Boolean).length;
+  const totalCount = Object.keys(statusByChain).length;
+
   const statusText = `
-📊 <b>Auto-Sweeper Status</b>
+📊 <b>Multi-Chain Auto-Sweeper Status</b>
 
 🌐 <b>Mode:</b> ${modeInfo}
-� <b>Wallet:</b> ${walletStatus}
+🔐 <b>Wallet:</b> ${walletStatus}
 🎯 <b>Destination:</b> ${destInfo}
-⚡ <b>Ethereum Sweeper:</b> ${status}
 
+<b>Chain Status (${activeCount}/${totalCount} active):</b>
+${chainStatusText}
 ${!mnemonic ? "\n💡 Send your mnemonic phrase to connect wallet" : ""}
 ${!userData.destAddress ? "\n💡 Send a wallet address to set destination" : ""}
 ${
-  mnemonic &&
-  userData.destAddress &&
-  !multiUserSweeper.getUserSweeperStatus(userId, chainKey)
-    ? "\n💡 Use /start to begin auto-sweeping"
+  mnemonic && userData.destAddress && activeCount === 0
+    ? "\n💡 Use /start to begin auto-sweeping on all chains"
     : ""
 }
 `.trim();
@@ -296,47 +438,97 @@ bot.onText(/^\/balance$/, async (msg) => {
     );
   }
 
-  const chainKey = "ethereum";
-  const config = chains[chainKey];
-
   try {
-    bot.sendMessage(msg.chat.id, `🔍 Checking your ${config.name} balance...`);
+    bot.sendMessage(
+      msg.chat.id,
+      `🔍 Checking your balances across all chains...`
+    );
 
-    const wallet = getWalletFromMnemonic(mnemonic, chainKey);
-    const nativeBalance = await wallet.provider.getBalance(wallet.address);
-    const nativeInfo = formatNativeBalance(chainKey, nativeBalance);
-    const tokens = await getTokenBalances(chainKey, wallet.address);
-
+    const balancesByChain = await checkBalancesAllChains(mnemonic);
     const modeIndicator = isTestnetMode ? "🧪" : "📡";
+
+    // Get first wallet address (same across all chains)
+    const firstChainKey = Object.keys(chains)[0];
+    const wallet = getWalletFromMnemonic(mnemonic, firstChainKey);
     const shortAddress = `${wallet.address.substring(
       0,
       6
     )}...${wallet.address.substring(wallet.address.length - 4)}`;
 
-    let reply = `${modeIndicator} <b>Your ${config.name} Wallet</b>\n\n📍 <b>Address:</b> <code>${shortAddress}</code>\n\n💎 <b>Balances:</b>\n\n`;
+    let reply = `${modeIndicator} <b>Your Multi-Chain Wallet</b>\n\n📍 <b>Address:</b> <code>${shortAddress}</code>\n\n`;
 
-    reply += `💠 ${nativeInfo.formatted} ${nativeInfo.symbol}\n`;
+    // Display balances for each chain
+    for (const [chainName, chainData] of Object.entries(balancesByChain)) {
+      if (chainData.error) {
+        reply += `🔴 <b>${chainName}:</b> Error - ${chainData.error}\n\n`;
+        continue;
+      }
 
-    if (tokens.length) {
-      tokens.forEach((t) => {
-        const formatted = ethers.formatUnits(t.balance, t.decimals);
-        reply += `🪙 ${formatted} ${t.symbol}\n`;
-      });
-    } else {
-      reply += `\n😊 No tokens found`;
+      reply += `💎 <b>${chainName} Balances:</b>\n`;
+      reply += `💠 ${chainData.native.formatted} ${chainData.native.symbol}\n`;
+
+      if (chainData.tokens.length > 0) {
+        chainData.tokens.forEach((token) => {
+          const formatted = ethers.formatUnits(token.balance, token.decimals);
+          reply += `🪙 ${formatted} ${token.symbol}\n`;
+        });
+      } else {
+        reply += `😊 No tokens found\n`;
+      }
+      reply += `\n`;
     }
 
     if (isTestnetMode) {
-      reply += `\n\n🛡️ Test mode - these aren't real funds`;
+      reply += `\n🛡️ Test mode - these aren't real funds`;
     }
 
     bot.sendMessage(msg.chat.id, reply, { parse_mode: "HTML" });
   } catch (err) {
     bot.sendMessage(
       msg.chat.id,
-      `😔 Error checking balance: ${err.message}\n\n💡 Try again in a moment!`
+      `😔 Error checking balances: ${err.message}\n\n💡 Try again in a moment!`
     );
   }
+});
+
+// /help command
+bot.onText(/^\/help$/, (msg) => {
+  const chainNames = Object.values(chains).map((config) =>
+    config.name.replace(" Sepolia", "").replace(" Amoy", "")
+  );
+
+  const helpText = `
+🤖 <b>Multi-Chain Auto-Sweep Bot</b>
+
+🌐 <b>Supported Chains:</b>
+${chainNames.map((name) => `• ${name}`).join("\n")}
+
+📋 <b>Commands:</b>
+
+🚀 /start - Start auto-sweeping on ALL chains
+✋ /stop - Stop auto-sweeping on all chains  
+📊 /status - Check sweeper status across all chains
+💰 /balance - View balances on all chains
+❓ /help - Show this help message
+
+🔧 <b>Setup:</b>
+1️⃣ Send your 12-24 word recovery phrase
+2️⃣ Send your destination wallet address (0x...)
+3️⃣ Use /start to begin monitoring
+
+🛡️ <b>Security:</b>
+• Your seed phrase is encrypted and stored locally
+• Funds are automatically swept to your chosen destination
+• You'll get notifications for every successful sweep
+
+${
+  isTestnetMode
+    ? "🧪 <b>Currently in Test Mode</b> - Safe for practice!"
+    : "📡 <b>Live Mode</b> - Real cryptocurrency"
+}
+  `.trim();
+
+  bot.sendMessage(msg.chat.id, helpText, { parse_mode: "HTML" });
 });
 
 // Automatic message detection for mnemonic phrases and wallet addresses
