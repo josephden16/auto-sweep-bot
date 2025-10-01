@@ -27,6 +27,7 @@ function getChainConfigs() {
         chainId: 11155111,
         rpcUrl: process.env.ETH_RPC,
         usdThreshold: 1, // Lower threshold for testnet
+        nativeUsdThreshold: 10, // Lower native token threshold for testnet
         pollInterval: 30000, // Longer interval for testnet
         testnet: true,
       },
@@ -43,6 +44,7 @@ function getChainConfigs() {
         chainId: 5003,
         rpcUrl: process.env.MANTLE_RPC,
         usdThreshold: 1,
+        nativeUsdThreshold: 10, // Lower native token threshold for testnet
         pollInterval: 30000,
         testnet: true,
       },

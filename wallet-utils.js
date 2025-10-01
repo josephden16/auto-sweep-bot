@@ -147,11 +147,40 @@ async function getTokenBalances(chain, address) {
       contract: t.contractAddress,
       balance: t.tokenBalance,
       symbol: meta.symbol,
+      name: meta.name || meta.symbol || "Unknown",
       decimals: meta.decimals || 18,
     });
   }
 
   return balances;
+}
+
+/**
+ * Estimate gas needed for ERC-20 token transfers
+ */
+async function estimateTokenGasCosts(wallet, destAddress, tokens) {
+  let totalGasNeeded = ethers.BigNumber.from("0");
+
+  for (const token of tokens) {
+    try {
+      const abi = [
+        "function transfer(address to, uint256 value) returns (bool)",
+      ];
+      const contract = new ethers.Contract(token.contract, abi, wallet);
+
+      // Estimate gas for this token transfer
+      const gasEstimate = await contract.estimateGas.transfer(
+        destAddress,
+        token.balance
+      );
+      totalGasNeeded = totalGasNeeded.add(gasEstimate);
+    } catch (error) {
+      // If gas estimation fails, use a conservative estimate
+      totalGasNeeded = totalGasNeeded.add(ethers.BigNumber.from("65000")); // Conservative ERC-20 transfer gas
+    }
+  }
+
+  return totalGasNeeded;
 }
 
 /**
@@ -167,25 +196,54 @@ async function sweepToken(wallet, dest, token) {
   const rawBalance = await contract.balanceOf(wallet.address);
   if (rawBalance.eq(0)) return null;
 
-  const tx = await contract.transfer(dest, rawBalance);
-  return tx.hash;
+  // Check if we have enough gas before attempting transfer
+  const balance = await wallet.provider.getBalance(wallet.address);
+  const feeData = await wallet.provider.getFeeData();
+  const gasPrice = feeData.gasPrice || ethers.utils.parseUnits("30", "gwei");
+
+  try {
+    const gasEstimate = await contract.estimateGas.transfer(dest, rawBalance);
+    const gasCost = gasEstimate.mul(gasPrice);
+
+    if (balance.lt(gasCost)) {
+      throw new Error(
+        `Insufficient gas: need ${ethers.utils.formatEther(
+          gasCost
+        )} ETH, have ${ethers.utils.formatEther(balance)} ETH`
+      );
+    }
+
+    const tx = await contract.transfer(dest, rawBalance, {
+      gasLimit: gasEstimate.add(gasEstimate.div(10)), // Add 10% buffer
+      gasPrice: gasPrice,
+    });
+
+    return tx.hash;
+  } catch (error) {
+    throw new Error(`Token transfer failed: ${error.message}`);
+  }
 }
 
 /**
- * Sweep native token (ETH, MATIC, MNT)
+ * Sweep native token (ETH, MATIC, MNT) with smart gas management
  */
-async function sweepNative(wallet, dest, chain) {
+async function sweepNative(wallet, dest, chain, gasReserve = null) {
   const balance = await wallet.provider.getBalance(wallet.address);
   if (balance.eq(0)) return null;
 
   const feeData = await wallet.provider.getFeeData();
   const gasLimit = ethers.BigNumber.from("21000");
   const gasPrice = feeData.gasPrice || ethers.utils.parseUnits("30", "gwei");
-  const maxFee = gasPrice.mul(gasLimit);
+  const nativeTransferCost = gasPrice.mul(gasLimit);
 
-  if (balance.lte(maxFee)) return null;
+  // Total gas needed = native transfer cost + reserve for ERC-20 transfers
+  const totalGasNeeded = gasReserve
+    ? nativeTransferCost.add(gasReserve.mul(gasPrice))
+    : nativeTransferCost;
 
-  const amount = balance.sub(maxFee);
+  if (balance.lte(totalGasNeeded)) return null;
+
+  const amount = balance.sub(totalGasNeeded);
 
   const tx = await wallet.sendTransaction({
     to: dest,
@@ -287,4 +345,5 @@ module.exports = {
   getExplorerLink,
   formatNativeBalance,
   getNativeTokenInfo,
+  estimateTokenGasCosts,
 };
