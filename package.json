@@ -5,13 +5,17 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "start:multiuser": "node index-multiuser.js",
+    "test:multiuser": "node test-multiuser.js",
+    "dev": "nodemon index.js",
+    "dev:multiuser": "nodemon index-multiuser.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
     "ethers": "^6.15.0",
     "node-fetch": "^2.6.7",
-    "node-telegram-bot-api": "^0.61.0"
+    "node-telegram-bot-api": "^0.61.0",
+    "crypto": "^1.0.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

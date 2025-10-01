@@ -12,15 +12,17 @@ const {
   getOptimalGasPricing,
 } = require("./wallet-utils");
 
-const runningSweepers = {}; // chainKey -> true/false
+const runningSweepers = {}; // userKey-chainKey -> true/false
 const processedTransactions = new Set(); // Track processed transaction hashes
-const processingTransactions = {}; // chainKey -> boolean (true when processing transactions)
+const processingTransactions = {}; // userKey-chainKey -> boolean (true when processing transactions)
+const sweeperIntervals = {}; // userKey-chainKey -> intervalId
 
-function logEvent(msg) {
-  console.log(`[${new Date().toISOString()}] ${msg}\n`);
+function logEvent(msg, userId = null) {
+  const logMsg = userId ? `[User: ${userId.substring(0, 8)}...] ${msg}` : msg;
+  console.log(`[${new Date().toISOString()}] ${logMsg}\n`);
   fs.appendFileSync(
     "logs/sweeper.log",
-    `[${new Date().toISOString()}] ${msg}\n`
+    `[${new Date().toISOString()}] ${logMsg}\n`
   );
 }
 
@@ -102,7 +104,24 @@ async function getTokenPriceUSD(symbol) {
 }
 
 // --- Sweeper loop ---
-function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
+function startSweeper(
+  chainKey,
+  config,
+  mnemonic,
+  destAddress,
+  notify,
+  userId = "default"
+) {
+  const userChainKey = `${userId}-${chainKey}`;
+
+  if (runningSweepers[userChainKey]) {
+    logEvent(
+      `Sweeper already running for user ${userId} on ${chainKey}`,
+      userId
+    );
+    return userChainKey;
+  }
+
   const wallet = getWalletFromMnemonic(mnemonic, chainKey);
 
   const friendlyChainName = config.name
@@ -121,16 +140,17 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
   notify(
     `🎉 Great! I'm now watching your ${friendlyChainName} wallet for funds to collect!\n\n📱 Wallet: ${shortWalletAddress}\n🏦 Funds will go to: ${shortDestAddress}\n\n💫 You'll be notified whenever I find and move funds for you!`
   );
-  runningSweepers[chainKey] = true;
-  processingTransactions[chainKey] = false; // Initialize processing state
+  runningSweepers[userChainKey] = true;
+  processingTransactions[userChainKey] = false; // Initialize processing state
 
   async function loop() {
-    if (!runningSweepers[chainKey]) return;
+    if (!runningSweepers[userChainKey]) return;
 
     // Check if transactions are currently being processed
-    if (processingTransactions[chainKey]) {
+    if (processingTransactions[userChainKey]) {
       logEvent(
-        `[${config.name}] Transactions still processing, skipping this cycle`
+        `[${config.name}] Transactions still processing, skipping this cycle`,
+        userId
       );
       setTimeout(loop, config.pollInterval || 20000);
       return;
@@ -142,7 +162,8 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
       nativeBalance = await wallet.provider.getBalance(wallet.address);
     } catch (err) {
       logEvent(
-        `[${config.name}] Failed to check wallet balance: ${err.message}`
+        `[${config.name}] Failed to check wallet balance: ${err.message}`,
+        userId
       );
       setTimeout(loop, config.pollInterval || 20000);
       return;
@@ -202,7 +223,10 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
         }
       }
     } catch (err) {
-      logEvent(`[${config.name}] Token balance fetch error: ${err.stack}`);
+      logEvent(
+        `[${config.name}] Token balance fetch error: ${err.stack}`,
+        userId
+      );
     }
 
     // Check if wallet is dust (insufficient for any meaningful operations)
@@ -319,7 +343,7 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
     }
 
     // Set processing flag before starting any transactions
-    processingTransactions[chainKey] = true;
+    processingTransactions[userChainKey] = true;
 
     try {
       // Sweep native coin with gas reservation (only if value >= $10)
@@ -396,19 +420,28 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
       }
     } finally {
       // Always clear the processing flag, even if errors occurred
-      processingTransactions[chainKey] = false;
+      processingTransactions[userChainKey] = false;
     }
 
     setTimeout(loop, config.pollInterval || 60 * 1000);
   }
 
+  // Start the loop
   loop();
+
+  // Store the interval ID for potential cleanup
+  sweeperIntervals[userChainKey] = true;
+
+  logEvent(`Started sweeper for user ${userId} on chain ${chainKey}`, userId);
+  return userChainKey;
 }
 
-function stopSweeper(chainKey) {
-  runningSweepers[chainKey] = false;
-  processingTransactions[chainKey] = false; // Clear processing state
-  logEvent(`[${chainKey}] Sweeper stopped`);
+function stopSweeper(chainKey, userId = "default") {
+  const userChainKey = `${userId}-${chainKey}`;
+  runningSweepers[userChainKey] = false;
+  processingTransactions[userChainKey] = false; // Clear processing state
+  delete sweeperIntervals[userChainKey];
+  logEvent(`[${chainKey}] Sweeper stopped`, userId);
 }
 
 function stopAllSweepers() {

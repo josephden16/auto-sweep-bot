@@ -2,7 +2,8 @@ const TelegramBot = require("node-telegram-bot-api");
 const { ethers } = require("ethers");
 require("dotenv").config();
 
-const { startSweeper, stopAllSweepers, runningSweepers } = require("./sweeper");
+const { getUserManager } = require("./user-manager");
+const { getMultiUserSweeper } = require("./multi-user-sweeper");
 
 const {
   getWalletFromMnemonic,
@@ -12,22 +13,25 @@ const {
 } = require("./wallet-utils");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
+const MAX_USERS = parseInt(process.env.MAX_USERS) || 3;
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const userManager = getUserManager();
+const multiUserSweeper = getMultiUserSweeper();
+
+// Send startup message
+console.log("🎉 Multi-user Ethereum auto-sweep bot is starting...");
+console.log(`👥 Maximum users allowed: ${MAX_USERS}`);
+console.log(
+  `🌐 Running in: ${
+    isTestnetMode
+      ? "🧪 Safe Test Mode (practice with fake money)"
+      : "📡 Live Mode (real cryptocurrency)"
+  }`
+);
+console.log(`💎 Ready to help with: Ethereum`);
 
 // --- Chain configs based on TEST_MODE ---
-
-// Send startup message to Telegram
-bot.sendMessage(
-  CHAT_ID,
-  `🎉 Welcome! Your Ethereum auto-sweep bot is ready to help!\n🌐 Running in ${
-    isTestnetMode
-      ? "🧪 Test Mode (safe for learning)"
-      : "📡 Live Mode (real money)"
-  }\n\nType /help to get started! 💫`
-);
-
 function getChainConfigs() {
   if (isTestnetMode) {
     return {
@@ -40,24 +44,6 @@ function getChainConfigs() {
         pollInterval: 30000, // Longer interval for testnet
         testnet: true,
       },
-      // polygon: {
-      //   name: "Polygon Amoy",
-      //   chainId: 80002,
-      //   rpcUrl: process.env.POLYGON_RPC,
-      //   nativeUsdThreshold: 10, // Lower native token threshold for testnet
-      //   usdThreshold: 1,
-      //   pollInterval: 30000,
-      //   testnet: true,
-      // },
-      // mantle: {
-      //   name: "Mantle Testnet",
-      //   chainId: 5003,
-      //   rpcUrl: process.env.MANTLE_RPC,
-      //   usdThreshold: 1,
-      //   nativeUsdThreshold: 10, // Lower native token threshold for testnet
-      //   pollInterval: 30000,
-      //   testnet: true,
-      // },
     };
   }
 
@@ -72,48 +58,36 @@ function getChainConfigs() {
       pollInterval: 20000,
       testnet: false,
     },
-    // polygon: {
-    //   name: "Polygon",
-    //   chainId: 137,
-    //   rpcUrl: process.env.POLYGON_RPC,
-    //   nativeUsdThreshold: 20,
-    //   usdThreshold: 5,
-    //   pollInterval: 20000,
-    //   testnet: false,
-    // },
-    // mantle: {
-    //   name: "Mantle",
-    //   chainId: 5000,
-    //   rpcUrl: process.env.MANTLE_RPC,
-    //   nativeUsdThreshold: 20,
-    //   usdThreshold: 5,
-    //   pollInterval: 20000,
-    //   testnet: false,
-    // },
   };
 }
 
 const chains = getChainConfigs();
 
-// --- Startup message ---
-console.log(`🌟 Your Auto-Sweep Assistant is starting up...`);
-console.log(
-  `🌐 Running in: ${
-    isTestnetMode
-      ? "🧪 Safe Test Mode (practice with fake money)"
-      : "📡 Live Mode (real cryptocurrency)"
-  }`
-);
-console.log(`💎 Ready to help with: Ethereum`);
-
-// --- Runtime vars ---
-let mnemonic = null;
-let destAddress = process.env.DEST_ADDRESS || null;
+// --- Helper functions ---
+async function ensureUserRegistered(userId) {
+  let userData = userManager.getUserData(userId);
+  if (!userData) {
+    if (!userManager.canRegisterNewUser()) {
+      throw new Error(
+        `Sorry! The bot has reached its maximum capacity of ${MAX_USERS} users. Please try again later.`
+      );
+    }
+    userData = await userManager.registerUser(userId);
+  }
+  userManager.updateUserActivity(userId);
+  return userData;
+}
 
 // --- Commands ---
 
-bot.onText(/^\/help$/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
+bot.onText(/^\/help$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
 
   const modeInfo = isTestnetMode
     ? "🧪 Test Mode (Practice with fake money)"
@@ -126,23 +100,11 @@ bot.onText(/^\/help$/, (msg) => {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
 
-  const availableChains = Object.entries(chains)
-    .map(
-      ([, config]) =>
-        "• " +
-        escapeHtml(
-          config.name
-            .replace(" Testnet", "")
-            .replace(" Sepolia", "")
-            .replace(" Amoy", "")
-        )
-    )
-    .join("\n");
+  const stats = multiUserSweeper.getGlobalStats();
 
   const helpText = [
-    "🌟 <b>Welcome to Your Auto-Sweep Assistant!</b>",
+    "🌟 <b>Welcome!</b>",
     "",
-    "I help you automatically collect and organize your Ethereum crypto.",
     "",
     `🌐 <b>Currently running in:</b> ${escapeHtml(modeInfo)}`,
     "",
@@ -153,13 +115,13 @@ bot.onText(/^\/help$/, (msg) => {
     "",
     "<b>⚡ Quick Actions:</b>",
     "<code>/start_collecting</code> - Begin auto-collecting on Ethereum",
-    "<code>/stop_all</code> - Stop all collection activities",
+    "<code>/stop</code> - Stop all collection activities",
     "<code>/check_status</code> - See what's currently running",
     "",
     "🔍 <b>Explore Your Funds:</b>",
-    "<code>/check_balance</code> - See your Ethereum funds",
+    "<code>/check_balance</code> - See your funds",
     "",
-    "<b>� Blockchain:</b> Ethereum",
+    "<b>💎 Blockchain:</b> Ethereum",
     "",
     isTestnetMode
       ? "🛡️ <b>Safe Mode</b>: You're in test mode - perfect for learning without risk!"
@@ -171,13 +133,11 @@ bot.onText(/^\/help$/, (msg) => {
   bot
     .sendMessage(msg.chat.id, helpText, { parse_mode: "HTML" })
     .catch((err) => {
-      // If HTML fails, log and send a plain-text fallback
       console.error(
         "Failed to send help (HTML). Falling back to plain text:",
         err
       );
 
-      // Strip HTML tags and unescape entities for fallback
       let plain = helpText.replace(/<\/?[^>]+(>|$)/g, "");
       plain = plain
         .replace(/&amp;/g, "&")
@@ -191,8 +151,14 @@ bot.onText(/^\/help$/, (msg) => {
 });
 
 // Add setup wizard command
-bot.onText(/^\/setup$/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
+bot.onText(/^\/setup$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
 
   const setupText = `
 🌟 <b>Let's get you set up in 2 easy steps!</b>
@@ -224,8 +190,15 @@ Ready to begin? 🚀
   bot.sendMessage(msg.chat.id, setupText, { parse_mode: "HTML" });
 });
 
-bot.onText(/^\/connect_wallet (.+)/, (msg, match) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
+bot.onText(/^\/connect_wallet (.+)/, async (msg, match) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
   const phrase = match[1].trim();
   if (!ethers.Mnemonic.isValidMnemonic(phrase)) {
     return bot.sendMessage(
@@ -233,15 +206,27 @@ bot.onText(/^\/connect_wallet (.+)/, (msg, match) => {
       "🤔 Hmm, that doesn't look like a valid recovery phrase. Please check and try again!\n\n💡 Tip: Recovery phrases are usually 12 or 24 words separated by spaces."
     );
   }
-  mnemonic = phrase;
-  bot.sendMessage(
-    msg.chat.id,
-    "🎉 Great! Your wallet is now connected securely!\n\n👉 Next step: Use /set_destination to choose where funds should be sent.\n\n🔒 Your recovery phrase is safely stored and encrypted."
-  );
+
+  try {
+    await userManager.setUserMnemonic(userId, phrase);
+    bot.sendMessage(
+      msg.chat.id,
+      "🎉 Great! Your wallet is now connected securely!\n\n👉 Next step: Use /set_destination to choose where funds should be sent.\n\n🔒 Your recovery phrase is safely stored and encrypted."
+    );
+  } catch (error) {
+    bot.sendMessage(msg.chat.id, `❌ Error saving wallet: ${error.message}`);
+  }
 });
 
-bot.onText(/^\/set_destination (.+)/, (msg, match) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
+bot.onText(/^\/set_destination (.+)/, async (msg, match) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
   const address = match[1].trim();
   if (!ethers.isAddress(address)) {
     return bot.sendMessage(
@@ -249,33 +234,54 @@ bot.onText(/^\/set_destination (.+)/, (msg, match) => {
       "🤔 That doesn't look like a valid wallet address. Please double-check and try again!\n\n💡 Tip: Wallet addresses start with '0x' and are 42 characters long."
     );
   }
-  destAddress = address;
-  const shortAddress = `${address.substring(0, 6)}...${address.substring(
-    address.length - 4
-  )}`;
-  bot.sendMessage(
-    msg.chat.id,
-    `🎯 Perfect! Your destination wallet is set to: ${shortAddress}\n\n✅ Setup complete! You can now start collecting funds with /start_collecting or check your current balance with /check_balance`
-  );
+
+  try {
+    await userManager.setUserDestAddress(userId, address);
+    const shortAddress = `${address.substring(0, 6)}...${address.substring(
+      address.length - 4
+    )}`;
+    bot.sendMessage(
+      msg.chat.id,
+      `🎯 Perfect! Your destination wallet is set to: ${shortAddress}\n\n✅ Setup complete! You can now start collecting funds with /start_collecting or check your current balance with /check_balance`
+    );
+  } catch (error) {
+    bot.sendMessage(
+      msg.chat.id,
+      `❌ Error saving destination: ${error.message}`
+    );
+  }
 });
 
-bot.onText(/^\/start_collecting$/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
-  if (!mnemonic)
+bot.onText(/^\/start_collecting$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
+  const userData = userManager.getUserData(userId);
+  const mnemonic = userManager.getUserMnemonic(userId);
+
+  if (!mnemonic) {
     return bot.sendMessage(
       msg.chat.id,
       "🔐 Please connect your wallet first using /connect_wallet or /setup"
     );
-  if (!destAddress)
+  }
+
+  if (!userData.destAddress) {
     return bot.sendMessage(
       msg.chat.id,
       "💰 Please set your destination wallet first using /set_destination or /setup"
     );
+  }
 
   const chainKey = "ethereum"; // Default to ethereum
   const config = chains[chainKey];
 
-  if (runningSweepers[chainKey]) {
+  if (multiUserSweeper.getUserSweeperStatus(userId, chainKey)) {
     return bot.sendMessage(
       msg.chat.id,
       `👍 Good news! I'm already collecting funds on ${config.name}.\n\nCheck /check_status to see current status.`
@@ -291,15 +297,30 @@ bot.onText(/^\/start_collecting$/, (msg) => {
     `🚀 Starting automatic fund collection on ${friendlyChainName}!\n\n🔍 I'll monitor your wallet and automatically collect any funds that appear.\n💫 You'll get notified when funds are moved.`
   );
 
-  startSweeper(chainKey, config, mnemonic, destAddress, (event) =>
-    bot.sendMessage(msg.chat.id, event)
+  multiUserSweeper.startSweeperForUser(
+    userId,
+    chainKey,
+    config,
+    mnemonic,
+    userData.destAddress,
+    (event) => bot.sendMessage(msg.chat.id, event)
   );
 });
 
-bot.onText(/^\/stop_all$/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
-  const activeCount = Object.values(runningSweepers).filter(Boolean).length;
-  stopAllSweepers();
+bot.onText(/^\/stop$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
+  const activeSweepers = multiUserSweeper.getUserActiveSweepers(userId);
+  const activeCount = activeSweepers.length;
+
+  multiUserSweeper.stopAllSweepersForUser(userId);
+
   if (activeCount > 0) {
     bot.sendMessage(
       msg.chat.id,
@@ -308,13 +329,21 @@ bot.onText(/^\/stop_all$/, (msg) => {
   } else {
     bot.sendMessage(
       msg.chat.id,
-      "🛑 No collection activities were running. Everything is already stopped!"
+      "😊 No collection activities were running. Everything is already stopped!"
     );
   }
 });
 
-bot.onText(/^\/check_status$/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
+bot.onText(/^\/check_status$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
+  const userData = userManager.getUserData(userId);
   const chainKey = "ethereum";
   const config = chains[chainKey];
   const friendlyName = config.name
@@ -322,17 +351,18 @@ bot.onText(/^\/check_status$/, (msg) => {
     .replace(" Sepolia", "")
     .replace(" Amoy", "");
 
-  const status = runningSweepers[chainKey]
+  const status = multiUserSweeper.getUserSweeperStatus(userId, chainKey)
     ? "🟢 Actively collecting"
     : "⏸️ Paused";
 
   const modeInfo = isTestnetMode
     ? "🧪 Test Mode (Practice)"
     : "📡 Live Mode (Real crypto)";
-  const destInfo = destAddress
-    ? `${destAddress.substring(0, 6)}...${destAddress.substring(
-        destAddress.length - 4
-      )}`
+  const destInfo = userData.destAddress
+    ? `${userData.destAddress.substring(
+        0,
+        6
+      )}...${userData.destAddress.substring(userData.destAddress.length - 4)}`
     : "❌ Not set yet";
 
   bot.sendMessage(
@@ -342,12 +372,21 @@ bot.onText(/^\/check_status$/, (msg) => {
 });
 
 bot.onText(/^\/check_balance$/, async (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
-  if (!mnemonic)
+  const userId = msg.chat.id.toString();
+
+  try {
+    await ensureUserRegistered(userId);
+  } catch (error) {
+    return bot.sendMessage(msg.chat.id, `❌ ${error.message}`);
+  }
+
+  const mnemonic = userManager.getUserMnemonic(userId);
+  if (!mnemonic) {
     return bot.sendMessage(
       msg.chat.id,
       "🔐 Please connect your wallet first using /connect_wallet or try /setup for a guided experience!"
     );
+  }
 
   const chainKey = "ethereum"; // Default to ethereum
   const config = chains[chainKey];
@@ -412,9 +451,41 @@ bot.onText(/^\/check_balance$/, async (msg) => {
   }
 });
 
+// Admin commands
+bot.onText(/^\/admin_stats$/, async (msg) => {
+  const userId = msg.chat.id.toString();
+  const adminId = process.env.ADMIN_CHAT_ID;
+
+  if (adminId && userId !== adminId) {
+    return bot.sendMessage(msg.chat.id, "❌ Admin access required");
+  }
+
+  const stats = multiUserSweeper.getGlobalStats();
+  const allUsers = userManager.getAllUsers();
+
+  const statsText = [
+    "🔧 <b>Bot Statistics</b>",
+    "",
+    `👥 Users: ${stats.totalUsers}/${stats.maxUsers}`,
+    `🚀 Active Sweepers: ${stats.totalActiveSweepers}`,
+    `⚡ Active Users: ${stats.activeUsers}`,
+    "",
+    "<b>Recent Users:</b>",
+    ...allUsers
+      .slice(-5)
+      .map(
+        (user) =>
+          `• ${user.id.substring(0, 8)}... (${
+            user.isSetupComplete ? "✅" : "⏳"
+          })`
+      ),
+  ].join("\n");
+
+  bot.sendMessage(msg.chat.id, statsText, { parse_mode: "HTML" });
+});
+
 // Legacy command support with helpful redirects
 bot.onText(/^\/setwallet/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
     "🔄 Command updated! Please use /connect_wallet instead.\n\n💡 Or try /setup for a guided experience!"
@@ -422,7 +493,6 @@ bot.onText(/^\/setwallet/, (msg) => {
 });
 
 bot.onText(/^\/settarget/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
     "🔄 Command updated! Please use /set_destination instead.\n\n💡 Or try /setup for a guided experience!"
@@ -430,7 +500,6 @@ bot.onText(/^\/settarget/, (msg) => {
 });
 
 bot.onText(/^\/enable/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
     "🔄 Command updated! Please use /start_collecting instead."
@@ -438,15 +507,10 @@ bot.onText(/^\/enable/, (msg) => {
 });
 
 bot.onText(/^\/disable/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
-  bot.sendMessage(
-    msg.chat.id,
-    "🔄 Command updated! Please use /stop_all instead."
-  );
+  bot.sendMessage(msg.chat.id, "🔄 Command updated! Please use /stop instead.");
 });
 
 bot.onText(/^\/status/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
     "🔄 Command updated! Please use /check_status instead."
@@ -454,7 +518,6 @@ bot.onText(/^\/status/, (msg) => {
 });
 
 bot.onText(/^\/discover/, (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
     "🔄 Command updated! Please use /check_balance instead."
@@ -463,8 +526,6 @@ bot.onText(/^\/discover/, (msg) => {
 
 // Friendly conversation handlers
 bot.on("message", (msg) => {
-  if (msg.chat.id.toString() !== CHAT_ID) return;
-
   const text = msg.text?.toLowerCase();
   if (!text || text.startsWith("/")) return;
 
@@ -495,7 +556,9 @@ bot.on("message", (msg) => {
   } else if (text.includes("stop") || text.includes("pause")) {
     bot.sendMessage(
       msg.chat.id,
-      "✋ To stop all collection activities, use /stop_all\n\nTo check what's currently running, use /check_status"
+      "✋ To stop all collection activities, use /stop\n\nTo check what's currently running, use /check_status"
     );
   }
 });
+
+console.log("✅ Multi-user bot is ready and listening for commands!");
