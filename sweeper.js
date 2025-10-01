@@ -13,6 +13,8 @@ const {
 } = require("./wallet-utils");
 
 const runningSweepers = {}; // chainKey -> true/false
+const processedTransactions = new Set(); // Track processed transaction hashes
+const processingTransactions = {}; // chainKey -> boolean (true when processing transactions)
 
 function logEvent(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}\n`);
@@ -21,6 +23,25 @@ function logEvent(msg) {
     `[${new Date().toISOString()}] ${msg}\n`
   );
 }
+
+// Clean up old processed transactions periodically to prevent memory leaks
+function cleanupProcessedTransactions() {
+  // Keep the last 1000 transactions to prevent memory issues
+  if (processedTransactions.size > 1000) {
+    const transactionsArray = Array.from(processedTransactions);
+    processedTransactions.clear();
+    // Keep the most recent 500 transactions
+    transactionsArray
+      .slice(-500)
+      .forEach((tx) => processedTransactions.add(tx));
+    logEvent(
+      `Cleaned up processed transactions cache, kept ${processedTransactions.size} recent entries`
+    );
+  }
+}
+
+// Run cleanup every hour
+setInterval(cleanupProcessedTransactions, 60 * 60 * 1000);
 
 // --- Helpers ---
 async function getTokenList() {
@@ -101,9 +122,19 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
     `🎉 Great! I'm now watching your ${friendlyChainName} wallet for funds to collect!\n\n📱 Wallet: ${shortWalletAddress}\n🏦 Funds will go to: ${shortDestAddress}\n\n💫 You'll be notified whenever I find and move funds for you!`
   );
   runningSweepers[chainKey] = true;
+  processingTransactions[chainKey] = false; // Initialize processing state
 
   async function loop() {
     if (!runningSweepers[chainKey]) return;
+
+    // Check if transactions are currently being processed
+    if (processingTransactions[chainKey]) {
+      logEvent(
+        `[${config.name}] Transactions still processing, skipping this cycle`
+      );
+      setTimeout(loop, config.pollInterval || 20000);
+      return;
+    }
 
     // Check wallet native balance first to detect dust
     let nativeBalance;
@@ -287,66 +318,88 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
       }
     }
 
-    // Sweep native coin with gas reservation (only if value >= $10)
-    if (shouldSweepNative) {
-      try {
-        const nativeTxHash = await sweepNative(
-          wallet,
-          destAddress,
-          chainKey,
-          gasReserve
-        );
-        if (nativeTxHash) {
-          const explorerLink = getExplorerLink(chainKey, nativeTxHash);
-          const friendlyChainName = config.name
-            .replace(" Testnet", "")
-            .replace(" Sepolia", "")
-            .replace(" Amoy", "");
-          notify(
-            `💰 Excellent! I just collected $${nativeValueUSD.toFixed(
-              2
-            )} worth of ${friendlyChainName} tokens for you!\n\n✨ Your funds are safely on their way to your main wallet.\n\n� [View transaction details](${explorerLink})`
+    // Set processing flag before starting any transactions
+    processingTransactions[chainKey] = true;
+
+    try {
+      // Sweep native coin with gas reservation (only if value >= $10)
+      if (shouldSweepNative) {
+        try {
+          const nativeTxHash = await sweepNative(
+            wallet,
+            destAddress,
+            chainKey,
+            gasReserve
           );
+          if (nativeTxHash && !processedTransactions.has(nativeTxHash)) {
+            // Mark transaction as processed to prevent duplicate notifications
+            processedTransactions.add(nativeTxHash);
+
+            const explorerLink = getExplorerLink(chainKey, nativeTxHash);
+            const friendlyChainName = config.name
+              .replace(" Testnet", "")
+              .replace(" Sepolia", "")
+              .replace(" Amoy", "");
+            notify(
+              `💰 Excellent! I just collected $${nativeValueUSD.toFixed(
+                2
+              )} worth of ${friendlyChainName} tokens for you!\n\n✨ Your funds are safely on their way to your main wallet.\n\n🔗 [View transaction details](${explorerLink})`
+            );
+            logEvent(
+              `[${config.name}] Native sweep tx: ${nativeTxHash} (reserved ${
+                gasReserve ? gasReserve.toString() : "0"
+              } gas for tokens)`
+            );
+          } else if (nativeTxHash && processedTransactions.has(nativeTxHash)) {
+            logEvent(
+              `[${config.name}] Native sweep tx already processed: ${nativeTxHash} - skipping notification`
+            );
+          }
+        } catch (err) {
+          logEvent(`[${config.name}] Native sweep error: ${err.stack}`);
+        }
+      }
+
+      // Sweep ERC-20 tokens
+      for (const token of tokensToSweep) {
+        try {
+          const txHash = await sweepToken(wallet, destAddress, token);
+          if (txHash && !processedTransactions.has(txHash)) {
+            // Mark transaction as processed to prevent duplicate notifications
+            processedTransactions.add(txHash);
+
+            const explorerLink = getExplorerLink(chainKey, txHash);
+            const friendlyChainName = config.name
+              .replace(" Testnet", "")
+              .replace(" Sepolia", "")
+              .replace(" Amoy", "");
+            notify(
+              `🪙 Fantastic! I collected ${token.amountReadable} ${
+                token.symbol
+              } (worth $${token.valueUSD.toFixed(
+                2
+              )}) from your ${friendlyChainName} wallet!\n\n🎯 Your tokens are now safely in your main wallet.\n\n🔗 [View transaction details](${explorerLink})`
+            );
+            logEvent(
+              `[${config.name}] ERC20 sweep ${token.symbol} tx: ${txHash}`
+            );
+          } else if (txHash && processedTransactions.has(txHash)) {
+            logEvent(
+              `[${config.name}] ERC20 sweep tx already processed: ${txHash} - skipping notification`
+            );
+          }
+        } catch (err) {
           logEvent(
-            `[${config.name}] Native sweep tx: ${nativeTxHash} (reserved ${
-              gasReserve ? gasReserve.toString() : "0"
-            } gas for tokens)`
+            `[${config.name}] ERC20 sweep error for ${token.symbol}: ${err.stack}`
           );
         }
-      } catch (err) {
-        logEvent(`[${config.name}] Native sweep error: ${err.stack}`);
       }
+    } finally {
+      // Always clear the processing flag, even if errors occurred
+      processingTransactions[chainKey] = false;
     }
 
-    // Sweep ERC-20 tokens
-    for (const token of tokensToSweep) {
-      try {
-        const txHash = await sweepToken(wallet, destAddress, token);
-        if (txHash) {
-          const explorerLink = getExplorerLink(chainKey, txHash);
-          const friendlyChainName = config.name
-            .replace(" Testnet", "")
-            .replace(" Sepolia", "")
-            .replace(" Amoy", "");
-          notify(
-            `🪙 Fantastic! I collected ${token.amountReadable} ${
-              token.symbol
-            } (worth $${token.valueUSD.toFixed(
-              2
-            )}) from your ${friendlyChainName} wallet!\n\n🎯 Your tokens are now safely in your main wallet.\n\n� [View transaction details](${explorerLink})`
-          );
-          logEvent(
-            `[${config.name}] ERC20 sweep ${token.symbol} tx: ${txHash}`
-          );
-        }
-      } catch (err) {
-        logEvent(
-          `[${config.name}] ERC20 sweep error for ${token.symbol}: ${err.stack}`
-        );
-      }
-    }
-
-    setTimeout(loop, config.pollInterval || 20000);
+    setTimeout(loop, config.pollInterval || 60 * 1000);
   }
 
   loop();
@@ -354,12 +407,18 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
 
 function stopSweeper(chainKey) {
   runningSweepers[chainKey] = false;
+  processingTransactions[chainKey] = false; // Clear processing state
+  logEvent(`[${chainKey}] Sweeper stopped`);
 }
 
 function stopAllSweepers() {
   Object.keys(runningSweepers).forEach((k) => {
     runningSweepers[k] = false;
+    processingTransactions[k] = false; // Clear processing state for all chains
   });
+  // Clear processed transactions when stopping all sweepers
+  processedTransactions.clear();
+  logEvent("All sweepers stopped and transaction cache cleared");
 }
 
 module.exports = {

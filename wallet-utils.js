@@ -445,7 +445,7 @@ async function sweepNative(wallet, dest, chain, gasReserve = null) {
 
     // Wait for transaction confirmation with timeout
     console.log(`⏳ Waiting for native transfer confirmation: ${tx.hash}`);
-    console.log(`⏰ Timeout set for 5 minutes...`);
+    console.log(`⏰ Timeout set for 1 minute...`);
 
     try {
       const receipt = await waitForTransactionWithTimeout(tx, 1000 * 60 * 1); // 1 minute timeout

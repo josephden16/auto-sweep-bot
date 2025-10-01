@@ -7,10 +7,8 @@ const { startSweeper, stopAllSweepers, runningSweepers } = require("./sweeper");
 const {
   getWalletFromMnemonic,
   getTokenBalances,
-  getActiveChains,
   isTestnetMode,
   formatNativeBalance,
-  getNativeTokenInfo,
 } = require("./wallet-utils");
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -42,23 +40,24 @@ function getChainConfigs() {
         pollInterval: 30000, // Longer interval for testnet
         testnet: true,
       },
-      polygon: {
-        name: "Polygon Amoy",
-        chainId: 80002,
-        rpcUrl: process.env.POLYGON_RPC,
-        usdThreshold: 1,
-        pollInterval: 30000,
-        testnet: true,
-      },
-      mantle: {
-        name: "Mantle Testnet",
-        chainId: 5003,
-        rpcUrl: process.env.MANTLE_RPC,
-        usdThreshold: 1,
-        nativeUsdThreshold: 10, // Lower native token threshold for testnet
-        pollInterval: 30000,
-        testnet: true,
-      },
+      // polygon: {
+      //   name: "Polygon Amoy",
+      //   chainId: 80002,
+      //   rpcUrl: process.env.POLYGON_RPC,
+      //   nativeUsdThreshold: 10, // Lower native token threshold for testnet
+      //   usdThreshold: 1,
+      //   pollInterval: 30000,
+      //   testnet: true,
+      // },
+      // mantle: {
+      //   name: "Mantle Testnet",
+      //   chainId: 5003,
+      //   rpcUrl: process.env.MANTLE_RPC,
+      //   usdThreshold: 1,
+      //   nativeUsdThreshold: 10, // Lower native token threshold for testnet
+      //   pollInterval: 30000,
+      //   testnet: true,
+      // },
     };
   }
 
@@ -68,26 +67,29 @@ function getChainConfigs() {
       name: "Ethereum",
       chainId: 1,
       rpcUrl: process.env.ETH_RPC,
-      usdThreshold: 5,
+      usdThreshold: 10,
+      nativeUsdThreshold: 5,
       pollInterval: 20000,
       testnet: false,
     },
-    polygon: {
-      name: "Polygon",
-      chainId: 137,
-      rpcUrl: process.env.POLYGON_RPC,
-      usdThreshold: 5,
-      pollInterval: 20000,
-      testnet: false,
-    },
-    mantle: {
-      name: "Mantle",
-      chainId: 5000,
-      rpcUrl: process.env.MANTLE_RPC,
-      usdThreshold: 5,
-      pollInterval: 20000,
-      testnet: false,
-    },
+    // polygon: {
+    //   name: "Polygon",
+    //   chainId: 137,
+    //   rpcUrl: process.env.POLYGON_RPC,
+    //   nativeUsdThreshold: 20,
+    //   usdThreshold: 5,
+    //   pollInterval: 20000,
+    //   testnet: false,
+    // },
+    // mantle: {
+    //   name: "Mantle",
+    //   chainId: 5000,
+    //   rpcUrl: process.env.MANTLE_RPC,
+    //   nativeUsdThreshold: 20,
+    //   usdThreshold: 5,
+    //   pollInterval: 20000,
+    //   testnet: false,
+    // },
   };
 }
 
@@ -117,55 +119,84 @@ let mnemonic = null;
 let destAddress = process.env.DEST_ADDRESS || null;
 
 // --- Commands ---
+
 bot.onText(/^\/help$/, (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
 
   const modeInfo = isTestnetMode
     ? "🧪 Test Mode (Practice with fake money)"
     : "📡 Live Mode (Real cryptocurrency)";
+
+  // HTML-escape helper (important!)
+  const escapeHtml = (str) =>
+    String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
   const availableChains = Object.entries(chains)
     .map(
-      ([key, config]) =>
-        `• ${config.name
-          .replace(" Testnet", "")
-          .replace(" Sepolia", "")
-          .replace(" Amoy", "")}`
+      ([, config]) =>
+        "• " +
+        escapeHtml(
+          config.name
+            .replace(" Testnet", "")
+            .replace(" Sepolia", "")
+            .replace(" Amoy", "")
+        )
     )
     .join("\n");
 
-  const helpText = `
-🌟 **Welcome to Your Auto-Sweep Assistant!**
+  const helpText = [
+    "🌟 <b>Welcome to Your Auto-Sweep Assistant!</b>",
+    "",
+    "I help you automatically collect and organize your crypto across different blockchains.",
+    "",
+    `🌐 <b>Currently running in:</b> ${escapeHtml(modeInfo)}`,
+    "",
+    "<b>🚀 Getting Started:</b>",
+    "<code>/setup</code> - Quick setup wizard (recommended for beginners)",
+    "<code>/connect_wallet</code> - Connect your wallet securely",
+    "<code>/set_destination</code> - Choose where to send collected funds",
+    "",
+    "<b>⚡ Quick Actions:</b>",
+    "<code>/start_collecting &lt;blockchain&gt;</code> - Begin auto-collecting on a blockchain",
+    "<code>/stop_all</code> - Stop all collection activities",
+    "<code>/check_status</code> - See what's currently running",
+    "",
+    "🔍 <b>Explore Your Funds:</b>",
+    "<code>/check_balance &lt;blockchain&gt;</code> - See your funds on any blockchain",
+    "",
+    "<b>💡 Available Blockchains:</b>",
+    availableChains,
+    "",
+    isTestnetMode
+      ? "🛡️ <b>Safe Mode</b>: You're in test mode - perfect for learning without risk!"
+      : "⚠️ <b>Live Mode</b>: Real cryptocurrency - please double-check everything!",
+    "",
+    "Need help? Just ask me anything! 😊",
+  ].join("\n");
 
-I help you automatically collect and organize your crypto across different blockchains.
+  bot
+    .sendMessage(msg.chat.id, helpText, { parse_mode: "HTML" })
+    .catch((err) => {
+      // If HTML fails, log and send a plain-text fallback
+      console.error(
+        "Failed to send help (HTML). Falling back to plain text:",
+        err
+      );
 
-🌐 **Currently running in:** ${modeInfo}
+      // Strip HTML tags and unescape entities for fallback
+      let plain = helpText.replace(/<\/?[^>]+(>|$)/g, "");
+      plain = plain
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">");
 
-**🚀 Getting Started:**
-/setup - Quick setup wizard (recommended for beginners)
-/connect_wallet - Connect your wallet securely
-/set_destination - Choose where to send collected funds
-
-**⚡ Quick Actions:**
-/start_collecting <blockchain> - Begin auto-collecting on a blockchain
-/stop_all - Stop all collection activities
-/check_status - See what's currently running
-
-🔍 Explore Your Funds:
-/check_balance <blockchain> - See your funds on any blockchain
-
-**💡 Available Blockchains:**
-${availableChains}
-
-${
-  isTestnetMode
-    ? "🛡️ **Safe Mode**: You're in test mode - perfect for learning without risk!"
-    : "⚠️ **Live Mode**: Real cryptocurrency - please double-check everything!"
-}
-
-Need help? Just ask me anything! 😊
-  `.trim();
-
-  bot.sendMessage(msg.chat.id, helpText, { parse_mode: "Markdown" });
+      bot.sendMessage(msg.chat.id, plain).catch((err2) => {
+        console.error("Failed to send help fallback:", err2);
+      });
+    });
 });
 
 // Add setup wizard command
@@ -324,7 +355,7 @@ bot.onText(/^\/check_status$/, (msg) => {
 
   bot.sendMessage(
     msg.chat.id,
-    `📊 **Your Collection Status:**\n\n🌐 Mode: ${modeInfo}\n💰 Funds go to: ${destInfo}\n\n**Blockchain Status:**\n${statuses}\n\n💡 Use /start_collecting to begin on any blockchain!`
+    `📊 Your Collection Status:\n\n🌐 Mode: ${modeInfo}\n💰 Funds go to: ${destInfo}\n\nBlockchain Status:\n${statuses}\n\n💡 Use /start_collecting to begin on any blockchain!`
   );
 });
 
@@ -336,7 +367,7 @@ bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
       "🔐 Please connect your wallet first using /connect_wallet or try /setup for a guided experience!"
     );
 
-  const chainKey = match[1].toLowerCase();
+  const chainKey = match[1].toLowerCase() || "ethereum";
   const config = chains[chainKey];
   if (!config) {
     const availableChains = Object.keys(chains).join(", ");
@@ -364,7 +395,7 @@ bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
     // ERC20 balances
     const tokens = await getTokenBalances(chainKey, wallet.address);
 
-    const modeIndicator = isTestnetMode ? "🧪" : "�";
+    const modeIndicator = isTestnetMode ? "🧪" : "📡";
     const friendlyChainName = config.name
       .replace(" Testnet", "")
       .replace(" Sepolia", "")
@@ -395,7 +426,7 @@ bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
       reply += `\n\n🛡️ This is test mode - these aren't real funds`;
     }
 
-    reply += `\n\n💡 Want to collect these funds automatically? \n Use /start_collecting ${chainKey}`;
+    reply += `\n\n💡 Want to collect these funds automatically? \n Use <code>/start_collecting ${chainKey}</code>`;
 
     bot.sendMessage(msg.chat.id, reply, { parse_mode: "HTML" });
   } catch (err) {
