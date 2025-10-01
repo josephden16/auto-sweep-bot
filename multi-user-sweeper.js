@@ -198,10 +198,10 @@ function getMultiUserSweeper() {
 }
 
 // Clean up inactive users every hour
-setInterval(() => {
-  const sweeper = getMultiUserSweeper();
-  sweeper.cleanupInactiveUsers();
-}, 60 * 60 * 1000);
+// setInterval(() => {
+//   const sweeper = getMultiUserSweeper();
+//   sweeper.cleanupInactiveUsers();
+// }, 60 * 60 * 1000);
 
 module.exports = {
   getMultiUserSweeper,

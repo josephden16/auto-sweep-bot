@@ -20,10 +20,10 @@ const sweeperIntervals = {}; // userKey-chainKey -> intervalId
 function logEvent(msg, userId = null) {
   const logMsg = userId ? `[User: ${userId.substring(0, 8)}...] ${msg}` : msg;
   console.log(`[${new Date().toISOString()}] ${logMsg}\n`);
-  fs.appendFileSync(
-    "logs/sweeper.log",
-    `[${new Date().toISOString()}] ${logMsg}\n`
-  );
+  // fs.appendFileSync(
+  //   "logs/sweeper.log",
+  //   `[${new Date().toISOString()}] ${logMsg}\n`
+  // );
 }
 
 // Clean up old processed transactions periodically to prevent memory leaks
