@@ -9,6 +9,7 @@ const {
   getExplorerLink,
   estimateTokenGasCosts,
   getChainConfigWithMode,
+  getOptimalGasPricing,
 } = require("./wallet-utils");
 
 const runningSweepers = {}; // chainKey -> true/false
@@ -103,11 +104,11 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
       return;
     }
 
-    // Calculate minimum gas needed for basic operations
-    const feeData = await wallet.provider.getFeeData();
-    const gasPrice = feeData.gasPrice || ethers.utils.parseUnits("30", "gwei");
-    const basicTransferCost = gasPrice.mul(ethers.BigNumber.from("21000")); // Cost for basic native transfer
-    const tokenTransferCost = gasPrice.mul(ethers.BigNumber.from("65000")); // Conservative cost for ERC-20 transfer
+    // Calculate minimum gas needed for basic operations using optimal pricing
+    const gasPricing = await getOptimalGasPricing(wallet.provider);
+    const effectiveGasPrice = gasPricing.gasPrice || gasPricing.maxFeePerGas;
+    const basicTransferCost = effectiveGasPrice * 21000n; // Cost for basic native transfer
+    const tokenTransferCost = effectiveGasPrice * 78000n; // Conservative cost for ERC-20 transfer (65k + 20% buffer)
 
     // Get chain config for proper native symbol
     const chainConfig = getChainConfigWithMode(chainKey);
@@ -140,7 +141,7 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
       for (const token of tokens) {
         try {
           const amountReadable = Number(
-            ethers.utils.formatUnits(token.balance, token.decimals)
+            ethers.formatUnits(token.balance, token.decimals)
           );
 
           // Get USD price from batch result
@@ -162,12 +163,12 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
 
     // Check if wallet is dust (insufficient for any meaningful operations)
     const minimumNeededForTokens =
-      tokensToSweep.length > 0 ? tokenTransferCost : ethers.BigNumber.from("0");
-    const minimumNeeded = basicTransferCost.add(minimumNeededForTokens);
+      tokensToSweep.length > 0 ? tokenTransferCost : 0n;
+    const minimumNeeded = basicTransferCost + minimumNeededForTokens;
 
-    if (nativeBalance.lt(minimumNeeded) && tokensToSweep.length > 0) {
-      const nativeFormatted = ethers.utils.formatEther(nativeBalance);
-      const neededFormatted = ethers.utils.formatEther(minimumNeeded);
+    if (nativeBalance < minimumNeeded && tokensToSweep.length > 0) {
+      const nativeFormatted = ethers.formatEther(nativeBalance);
+      const neededFormatted = ethers.formatEther(minimumNeeded);
 
       logEvent(
         `[${config.name}] 💨 Wallet has dust balance (${nativeFormatted} ${nativeSymbol}). ` +
@@ -181,9 +182,9 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
     }
 
     // If native balance is too low even for itself, skip everything
-    if (nativeBalance.lt(basicTransferCost) && nativeBalance.gt(0)) {
-      const nativeFormatted = ethers.utils.formatEther(nativeBalance);
-      const neededFormatted = ethers.utils.formatEther(basicTransferCost);
+    if (nativeBalance < basicTransferCost && nativeBalance > 0n) {
+      const nativeFormatted = ethers.formatEther(nativeBalance);
+      const neededFormatted = ethers.formatEther(basicTransferCost);
 
       logEvent(
         `[${config.name}] 💨 Wallet has dust balance (${nativeFormatted} ${nativeSymbol}). ` +
@@ -220,21 +221,17 @@ function startSweeper(chainKey, config, mnemonic, destAddress, notify) {
     let shouldSweepNative = false;
     let nativeValueUSD = 0;
 
-    if (
-      nativeBalance.gt(
-        basicTransferCost.add(gasReserve || ethers.BigNumber.from("0"))
-      )
-    ) {
+    if (nativeBalance > basicTransferCost + (gasReserve || 0n)) {
       try {
         // Calculate the amount that would actually be swept (minus gas costs)
         const totalGasNeeded = gasReserve
-          ? basicTransferCost.add(gasReserve.mul(gasPrice))
+          ? basicTransferCost + gasReserve * effectiveGasPrice
           : basicTransferCost;
-        const sweepableAmount = nativeBalance.sub(totalGasNeeded);
+        const sweepableAmount = nativeBalance - totalGasNeeded;
 
-        if (sweepableAmount.gt(0)) {
+        if (sweepableAmount > 0n) {
           const sweepableFormatted = Number(
-            ethers.utils.formatEther(sweepableAmount)
+            ethers.formatEther(sweepableAmount)
           );
 
           // Get USD price for native token from batch result

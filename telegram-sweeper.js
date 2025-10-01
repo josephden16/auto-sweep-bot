@@ -19,6 +19,15 @@ const CHAT_ID = process.env.CHAT_ID;
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 // --- Chain configs based on TEST_MODE ---
+
+// Send startup message to Telegram
+bot.sendMessage(
+  CHAT_ID,
+  `🤖 Bot is now active\n🌐 Mode: ${
+    isTestnetMode ? "🧪 TESTNET" : "📡 MAINNET"
+  }`
+);
+
 function getChainConfigs() {
   if (isTestnetMode) {
     return {
@@ -133,7 +142,7 @@ ${
 bot.onText(/^\/setwallet (.+)/, (msg, match) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   const phrase = match[1].trim();
-  if (!ethers.utils.isValidMnemonic(phrase)) {
+  if (!ethers.Mnemonic.isValidMnemonic(phrase)) {
     return bot.sendMessage(msg.chat.id, "❌ Invalid mnemonic");
   }
   mnemonic = phrase;
@@ -143,7 +152,7 @@ bot.onText(/^\/setwallet (.+)/, (msg, match) => {
 bot.onText(/^\/settarget (.+)/, (msg, match) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   const address = match[1].trim();
-  if (!ethers.utils.isAddress(address)) {
+  if (!ethers.isAddress(address)) {
     return bot.sendMessage(msg.chat.id, "❌ Invalid address");
   }
   destAddress = address;
@@ -220,7 +229,7 @@ bot.onText(/^\/discover (.+)/, async (msg, match) => {
 
     if (tokens.length) {
       tokens.forEach((t) => {
-        const formatted = ethers.utils.formatUnits(t.balance, t.decimals);
+        const formatted = ethers.formatUnits(t.balance, t.decimals);
         reply += `• ${formatted} ${t.symbol} (${t.contract.substring(
           0,
           8

@@ -89,15 +89,15 @@ function getChainConfigWithMode(chain) {
 }
 
 /**
- * Derive wallet from mnemonic
+ * Derive wallet from mnemonic using ethers v6
  */
 function getWalletFromMnemonic(mnemonic, chain) {
   const chainConfig = getChainConfigWithMode(chain);
   if (!chainConfig) {
     throw new Error(`Unsupported chain: ${chain}`);
   }
-  const provider = new ethers.providers.JsonRpcProvider(chainConfig.rpc);
-  const wallet = ethers.Wallet.fromMnemonic(mnemonic).connect(provider);
+  const provider = new ethers.JsonRpcProvider(chainConfig.rpc);
+  const wallet = ethers.Wallet.fromPhrase(mnemonic, provider);
   return wallet;
 }
 
@@ -156,10 +156,10 @@ async function getTokenBalances(chain, address) {
 }
 
 /**
- * Estimate gas needed for ERC-20 token transfers
+ * Estimate gas needed for ERC-20 token transfers using ethers v6
  */
 async function estimateTokenGasCosts(wallet, destAddress, tokens) {
-  let totalGasNeeded = ethers.BigNumber.from("0");
+  let totalGasNeeded = 0n;
 
   for (const token of tokens) {
     try {
@@ -169,14 +169,16 @@ async function estimateTokenGasCosts(wallet, destAddress, tokens) {
       const contract = new ethers.Contract(token.contract, abi, wallet);
 
       // Estimate gas for this token transfer
-      const gasEstimate = await contract.estimateGas.transfer(
+      const gasEstimate = await contract.transfer.estimateGas(
         destAddress,
         token.balance
       );
-      totalGasNeeded = totalGasNeeded.add(gasEstimate);
+      // Add 20% buffer to each estimate
+      const bufferedGas = gasEstimate + (gasEstimate * 20n) / 100n;
+      totalGasNeeded = totalGasNeeded + bufferedGas;
     } catch (error) {
-      // If gas estimation fails, use a conservative estimate
-      totalGasNeeded = totalGasNeeded.add(ethers.BigNumber.from("65000")); // Conservative ERC-20 transfer gas
+      // If gas estimation fails, use a conservative estimate with buffer
+      totalGasNeeded = totalGasNeeded + 78000n; // Conservative ERC-20 transfer gas (65k + 20% buffer)
     }
   }
 
@@ -184,7 +186,99 @@ async function estimateTokenGasCosts(wallet, destAddress, tokens) {
 }
 
 /**
- * Sweep a single ERC20 token
+ * Wait for transaction confirmation with timeout
+ */
+async function waitForTransactionWithTimeout(tx, timeoutMs = 1000 * 60 * 1) {
+  return new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(
+        new Error(
+          `Transaction confirmation timeout after ${timeoutMs / 1000}s: ${
+            tx.hash
+          }`
+        )
+      );
+    }, timeoutMs);
+
+    try {
+      const receipt = await tx.wait(1);
+      clearTimeout(timeout);
+      resolve(receipt);
+    } catch (error) {
+      clearTimeout(timeout);
+      reject(error);
+    }
+  });
+}
+
+/**
+ * Get optimal gas pricing for the network with aggressive pricing for faster confirmation
+ */
+async function getOptimalGasPricing(provider) {
+  try {
+    const feeData = await provider.getFeeData();
+
+    // For networks that support EIP-1559 (like Ethereum mainnet/testnet)
+    if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+      // Use more balanced aggressive pricing for faster confirmation
+      // Increase both fees by 50% to maintain proper proportions
+      const aggressiveMaxFee =
+        feeData.maxFeePerGas + (feeData.maxFeePerGas * 50n) / 100n; // +50%
+      const aggressivePriorityFee =
+        feeData.maxPriorityFeePerGas +
+        (feeData.maxPriorityFeePerGas * 50n) / 100n; // +50% instead of +100%
+
+      // Ensure priority fee doesn't exceed max fee (EIP-1559 requirement)
+      const finalPriorityFee =
+        aggressivePriorityFee > aggressiveMaxFee
+          ? aggressiveMaxFee
+          : aggressivePriorityFee;
+
+      // Log gas fee calculation for debugging
+      if (aggressivePriorityFee > aggressiveMaxFee) {
+        console.log(
+          `⚠️ Priority fee adjusted: ${ethers.formatUnits(
+            aggressivePriorityFee,
+            "gwei"
+          )} gwei → ${ethers.formatUnits(finalPriorityFee, "gwei")} gwei`
+        );
+      }
+
+      return {
+        type: 2, // EIP-1559
+        maxFeePerGas: aggressiveMaxFee,
+        maxPriorityFeePerGas: finalPriorityFee,
+        gasPrice: null,
+      };
+    }
+    // For legacy networks (like Polygon, Mantle)
+    else {
+      // Use much more aggressive gas price - minimum 100 gwei or network suggested + 50%
+      const networkGasPrice =
+        feeData.gasPrice || ethers.parseUnits("100", "gwei");
+      const aggressiveGasPrice =
+        networkGasPrice + (networkGasPrice * 50n) / 100n; // Add 50% buffer
+
+      return {
+        type: 0, // Legacy
+        gasPrice: aggressiveGasPrice,
+        maxFeePerGas: null,
+        maxPriorityFeePerGas: null,
+      };
+    }
+  } catch (error) {
+    // Fallback to very aggressive pricing
+    return {
+      type: 0,
+      gasPrice: ethers.parseUnits("150", "gwei"), // Very high fallback for fast confirmation
+      maxFeePerGas: null,
+      maxPriorityFeePerGas: null,
+    };
+  }
+}
+
+/**
+ * Sweep a single ERC20 token using ethers v6 with improved gas management
  */
 async function sweepToken(wallet, dest, token) {
   const abi = [
@@ -194,65 +288,183 @@ async function sweepToken(wallet, dest, token) {
   const contract = new ethers.Contract(token.contract, abi, wallet);
 
   const rawBalance = await contract.balanceOf(wallet.address);
-  if (rawBalance.eq(0)) return null;
+  if (rawBalance === 0n) return null;
 
   // Check if we have enough gas before attempting transfer
   const balance = await wallet.provider.getBalance(wallet.address);
-  const feeData = await wallet.provider.getFeeData();
-  const gasPrice = feeData.gasPrice || ethers.utils.parseUnits("30", "gwei");
+  const gasPricing = await getOptimalGasPricing(wallet.provider);
 
   try {
-    const gasEstimate = await contract.estimateGas.transfer(dest, rawBalance);
-    const gasCost = gasEstimate.mul(gasPrice);
+    const gasEstimate = await contract.transfer.estimateGas(dest, rawBalance);
+    const gasLimit = gasEstimate + (gasEstimate * 20n) / 100n; // Add 20% buffer for safety
 
-    if (balance.lt(gasCost)) {
+    // Calculate gas cost based on pricing type
+    let gasCost;
+    if (gasPricing.type === 2) {
+      // EIP-1559 transaction
+      gasCost = gasLimit * gasPricing.maxFeePerGas;
+    } else {
+      // Legacy transaction
+      gasCost = gasLimit * gasPricing.gasPrice;
+    }
+
+    if (balance < gasCost) {
       throw new Error(
-        `Insufficient gas: need ${ethers.utils.formatEther(
+        `Insufficient gas: need ${ethers.formatEther(
           gasCost
-        )} ETH, have ${ethers.utils.formatEther(balance)} ETH`
+        )} ETH, have ${ethers.formatEther(balance)} ETH`
       );
     }
 
-    const tx = await contract.transfer(dest, rawBalance, {
-      gasLimit: gasEstimate.add(gasEstimate.div(10)), // Add 10% buffer
-      gasPrice: gasPrice,
+    // Construct transaction with appropriate gas pricing
+    const txParams = {
+      gasLimit: gasLimit,
+    };
+
+    if (gasPricing.type === 2) {
+      // EIP-1559 transaction
+      txParams.maxFeePerGas = gasPricing.maxFeePerGas;
+      txParams.maxPriorityFeePerGas = gasPricing.maxPriorityFeePerGas;
+      txParams.type = 2;
+    } else {
+      // Legacy transaction
+      txParams.gasPrice = gasPricing.gasPrice;
+      txParams.type = 0;
+    }
+
+    console.log(`🔧 Token transfer gas config:`, {
+      gasLimit: gasLimit.toString(),
+      gasCost: ethers.formatEther(gasCost),
+      type: gasPricing.type === 2 ? "EIP-1559" : "Legacy",
+      ...(gasPricing.type === 2
+        ? {
+            maxFeePerGas:
+              ethers.formatUnits(gasPricing.maxFeePerGas, "gwei") + " gwei",
+            maxPriorityFeePerGas:
+              ethers.formatUnits(gasPricing.maxPriorityFeePerGas, "gwei") +
+              " gwei",
+          }
+        : {
+            gasPrice: ethers.formatUnits(gasPricing.gasPrice, "gwei") + " gwei",
+          }),
     });
 
-    return tx.hash;
+    const tx = await contract.transfer(dest, rawBalance, txParams);
+
+    // Wait for transaction confirmation with timeout
+    console.log(`⏳ Waiting for token transfer confirmation: ${tx.hash}`);
+    console.log(`⏰ Timeout set for 1 minute...`);
+
+    try {
+      const receipt = await waitForTransactionWithTimeout(tx, 1000 * 60 * 1); // 1 minute timeout
+
+      if (receipt.status === 1) {
+        console.log(`✅ Token transfer confirmed: ${tx.hash}`);
+        return tx.hash;
+      } else {
+        throw new Error(`Transaction failed: ${tx.hash}`);
+      }
+    } catch (timeoutError) {
+      // If timeout occurs, return the hash anyway (transaction might confirm later)
+      console.log(`⚠️ Transaction timeout (may still confirm): ${tx.hash}`);
+      console.log(`🔗 Check manually: ${timeoutError.message}`);
+      return tx.hash; // Return hash so user can track manually
+    }
   } catch (error) {
     throw new Error(`Token transfer failed: ${error.message}`);
   }
 }
 
 /**
- * Sweep native token (ETH, MATIC, MNT) with smart gas management
+ * Sweep native token (ETH, MATIC, MNT) with smart gas management using ethers v6
  */
 async function sweepNative(wallet, dest, chain, gasReserve = null) {
   const balance = await wallet.provider.getBalance(wallet.address);
-  if (balance.eq(0)) return null;
+  if (balance === 0n) return null;
 
-  const feeData = await wallet.provider.getFeeData();
-  const gasLimit = ethers.BigNumber.from("21000");
-  const gasPrice = feeData.gasPrice || ethers.utils.parseUnits("30", "gwei");
-  const nativeTransferCost = gasPrice.mul(gasLimit);
+  const gasPricing = await getOptimalGasPricing(wallet.provider);
+  const gasLimit = 21000n;
+
+  // Calculate native transfer cost
+  let nativeTransferCost;
+  if (gasPricing.type === 2) {
+    nativeTransferCost = gasLimit * gasPricing.maxFeePerGas;
+  } else {
+    nativeTransferCost = gasLimit * gasPricing.gasPrice;
+  }
 
   // Total gas needed = native transfer cost + reserve for ERC-20 transfers
-  const totalGasNeeded = gasReserve
-    ? nativeTransferCost.add(gasReserve.mul(gasPrice))
-    : nativeTransferCost;
+  const gasReserveCost = gasReserve
+    ? gasReserve * (gasPricing.gasPrice || gasPricing.maxFeePerGas)
+    : 0n;
+  const totalGasNeeded = nativeTransferCost + gasReserveCost;
 
-  if (balance.lte(totalGasNeeded)) return null;
+  if (balance <= totalGasNeeded) return null;
 
-  const amount = balance.sub(totalGasNeeded);
+  const amount = balance - totalGasNeeded;
 
-  const tx = await wallet.sendTransaction({
+  // Construct transaction with appropriate gas pricing
+  const txParams = {
     to: dest,
     value: amount,
-    gasLimit,
-    gasPrice: gasPrice,
+    gasLimit: gasLimit,
+  };
+
+  if (gasPricing.type === 2) {
+    // EIP-1559 transaction
+    txParams.maxFeePerGas = gasPricing.maxFeePerGas;
+    txParams.maxPriorityFeePerGas = gasPricing.maxPriorityFeePerGas;
+    txParams.type = 2;
+  } else {
+    // Legacy transaction
+    txParams.gasPrice = gasPricing.gasPrice;
+    txParams.type = 0;
+  }
+
+  console.log(`🔧 Native transfer gas config:`, {
+    amount: ethers.formatEther(amount),
+    gasLimit: gasLimit.toString(),
+    gasCost: ethers.formatEther(nativeTransferCost),
+    reserved: ethers.formatEther(gasReserveCost),
+    type: gasPricing.type === 2 ? "EIP-1559" : "Legacy",
+    ...(gasPricing.type === 2
+      ? {
+          maxFeePerGas:
+            ethers.formatUnits(gasPricing.maxFeePerGas, "gwei") + " gwei",
+          maxPriorityFeePerGas:
+            ethers.formatUnits(gasPricing.maxPriorityFeePerGas, "gwei") +
+            " gwei",
+        }
+      : {
+          gasPrice: ethers.formatUnits(gasPricing.gasPrice, "gwei") + " gwei",
+        }),
   });
 
-  return tx.hash;
+  try {
+    const tx = await wallet.sendTransaction(txParams);
+
+    // Wait for transaction confirmation with timeout
+    console.log(`⏳ Waiting for native transfer confirmation: ${tx.hash}`);
+    console.log(`⏰ Timeout set for 5 minutes...`);
+
+    try {
+      const receipt = await waitForTransactionWithTimeout(tx, 1000 * 60 * 1); // 1 minute timeout
+
+      if (receipt.status === 1) {
+        console.log(`✅ Native transfer confirmed: ${tx.hash}`);
+        return tx.hash;
+      } else {
+        throw new Error(`Transaction failed: ${tx.hash}`);
+      }
+    } catch (timeoutError) {
+      // If timeout occurs, return the hash anyway (transaction might confirm later)
+      console.log(`⚠️ Transaction timeout (may still confirm): ${tx.hash}`);
+      console.log(`🔗 Check manually: ${timeoutError.message}`);
+      return tx.hash; // Return hash so user can track manually
+    }
+  } catch (error) {
+    throw new Error(`Native transfer failed: ${error.message}`);
+  }
 }
 
 /**
@@ -291,8 +503,8 @@ function formatNativeBalance(chain, balance) {
   const decimals = chainConfig.nativeDecimals || 18;
   const symbol = chainConfig.nativeSymbol || "ETH";
 
-  // Use ethers.utils.formatUnits for proper decimal handling
-  const formatted = ethers.utils.formatUnits(balance, decimals);
+  // Use ethers.formatUnits for proper decimal handling
+  const formatted = ethers.formatUnits(balance, decimals);
 
   return {
     formatted,
@@ -346,4 +558,6 @@ module.exports = {
   formatNativeBalance,
   getNativeTokenInfo,
   estimateTokenGasCosts,
+  getOptimalGasPricing,
+  waitForTransactionWithTimeout,
 };

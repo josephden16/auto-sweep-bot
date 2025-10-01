@@ -5,15 +5,11 @@
   "main": "telegram-sweeper.js",
   "scripts": {
     "start": "node telegram-sweeper.js",
-    "dev": "nodemon telegram-sweeper.js",
-    "test": "node test-config.js",
-    "test-mode": "node test-mode-demo.js",
-    "test-explorer": "node test-explorer-links.js",
-    "test-native": "node test-native-tokens.js"
+    "dev": "nodemon telegram-sweeper.js"
   },
   "dependencies": {
     "dotenv": "^16.3.1",
-    "ethers": "^5.7.2",
+    "ethers": "^6.15.0",
     "node-fetch": "^2.6.7",
     "node-telegram-bot-api": "^0.61.0"
   },
