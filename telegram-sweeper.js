@@ -21,7 +21,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 // Send startup message to Telegram
 bot.sendMessage(
   CHAT_ID,
-  `🎉 Welcome! Your auto-sweep bot is ready to help!\n🌐 Running in ${
+  `🎉 Welcome! Your Ethereum auto-sweep bot is ready to help!\n🌐 Running in ${
     isTestnetMode
       ? "🧪 Test Mode (safe for learning)"
       : "📡 Live Mode (real money)"
@@ -104,15 +104,7 @@ console.log(
       : "📡 Live Mode (real cryptocurrency)"
   }`
 );
-const friendlyChains = Object.entries(chains)
-  .map(([key, config]) =>
-    config.name
-      .replace(" Testnet", "")
-      .replace(" Sepolia", "")
-      .replace(" Amoy", "")
-  )
-  .join(", ");
-console.log(`💎 Ready to help with:`, friendlyChains);
+console.log(`💎 Ready to help with: Ethereum`);
 
 // --- Runtime vars ---
 let mnemonic = null;
@@ -150,7 +142,7 @@ bot.onText(/^\/help$/, (msg) => {
   const helpText = [
     "🌟 <b>Welcome to Your Auto-Sweep Assistant!</b>",
     "",
-    "I help you automatically collect and organize your crypto across different blockchains.",
+    "I help you automatically collect and organize your Ethereum crypto.",
     "",
     `🌐 <b>Currently running in:</b> ${escapeHtml(modeInfo)}`,
     "",
@@ -160,15 +152,14 @@ bot.onText(/^\/help$/, (msg) => {
     "<code>/set_destination</code> - Choose where to send collected funds",
     "",
     "<b>⚡ Quick Actions:</b>",
-    "<code>/start_collecting &lt;blockchain&gt;</code> - Begin auto-collecting on a blockchain",
+    "<code>/start_collecting</code> - Begin auto-collecting on Ethereum",
     "<code>/stop_all</code> - Stop all collection activities",
     "<code>/check_status</code> - See what's currently running",
     "",
     "🔍 <b>Explore Your Funds:</b>",
-    "<code>/check_balance &lt;blockchain&gt;</code> - See your funds on any blockchain",
+    "<code>/check_balance</code> - See your Ethereum funds",
     "",
-    "<b>💡 Available Blockchains:</b>",
-    availableChains,
+    "<b>� Blockchain:</b> Ethereum",
     "",
     isTestnetMode
       ? "🛡️ <b>Safe Mode</b>: You're in test mode - perfect for learning without risk!"
@@ -218,9 +209,8 @@ Example: <code>/set_destination 0x1234...</code>
 
 💡 <i>This is where I'll send all collected funds - like your main savings account!</i>
 
-<b>That's it!</b> Once setup is complete, you can start collecting funds with commands like:
-• <code>/start_collecting ethereum</code>
-• <code>/start_collecting polygon</code>
+<b>That's it!</b> Once setup is complete, you can start collecting Ethereum funds with:
+• <code>/start_collecting</code>
 
 ${
   isTestnetMode
@@ -265,11 +255,11 @@ bot.onText(/^\/set_destination (.+)/, (msg, match) => {
   )}`;
   bot.sendMessage(
     msg.chat.id,
-    `🎯 Perfect! Your destination wallet is set to: ${shortAddress}\n\n✅ Setup complete! You can now start collecting funds with /start_collecting or check your current balances with /check_balance`
+    `🎯 Perfect! Your destination wallet is set to: ${shortAddress}\n\n✅ Setup complete! You can now start collecting funds with /start_collecting or check your current balance with /check_balance`
   );
 });
 
-bot.onText(/^\/start_collecting (.+)/, (msg, match) => {
+bot.onText(/^\/start_collecting$/, (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   if (!mnemonic)
     return bot.sendMessage(
@@ -282,20 +272,13 @@ bot.onText(/^\/start_collecting (.+)/, (msg, match) => {
       "💰 Please set your destination wallet first using /set_destination or /setup"
     );
 
-  const chainKey = match[1].toLowerCase();
+  const chainKey = "ethereum"; // Default to ethereum
   const config = chains[chainKey];
-  if (!config) {
-    const availableChains = Object.keys(chains).join(", ");
-    return bot.sendMessage(
-      msg.chat.id,
-      `🤔 I don't recognize "${chainKey}". Try one of these: ${availableChains}\n\n💡 Tip: Use /check_balance first to see what's available on each blockchain!`
-    );
-  }
 
   if (runningSweepers[chainKey]) {
     return bot.sendMessage(
       msg.chat.id,
-      `👍 Good news! I'm already collecting funds on ${config.name}.\n\nCheck /check_status to see all active collections.`
+      `👍 Good news! I'm already collecting funds on ${config.name}.\n\nCheck /check_status to see current status.`
     );
   }
 
@@ -325,24 +308,23 @@ bot.onText(/^\/stop_all$/, (msg) => {
   } else {
     bot.sendMessage(
       msg.chat.id,
-      "� No collection activities were running. Everything is already stopped!"
+      "🛑 No collection activities were running. Everything is already stopped!"
     );
   }
 });
 
 bot.onText(/^\/check_status$/, (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
-  const statuses = Object.entries(chains)
-    .map(([key, c]) => {
-      const friendlyName = c.name
-        .replace(" Testnet", "")
-        .replace(" Sepolia", "")
-        .replace(" Amoy", "");
-      return `${friendlyName}: ${
-        runningSweepers[key] ? "🟢 Actively collecting" : "⏸️ Paused"
-      }`;
-    })
-    .join("\n");
+  const chainKey = "ethereum";
+  const config = chains[chainKey];
+  const friendlyName = config.name
+    .replace(" Testnet", "")
+    .replace(" Sepolia", "")
+    .replace(" Amoy", "");
+
+  const status = runningSweepers[chainKey]
+    ? "🟢 Actively collecting"
+    : "⏸️ Paused";
 
   const modeInfo = isTestnetMode
     ? "🧪 Test Mode (Practice)"
@@ -355,11 +337,11 @@ bot.onText(/^\/check_status$/, (msg) => {
 
   bot.sendMessage(
     msg.chat.id,
-    `📊 Your Collection Status:\n\n🌐 Mode: ${modeInfo}\n💰 Funds go to: ${destInfo}\n\nBlockchain Status:\n${statuses}\n\n💡 Use /start_collecting to begin on any blockchain!`
+    `📊 Your Collection Status:\n\n🌐 Mode: ${modeInfo}\n💰 Funds go to: ${destInfo}\n\n${friendlyName}: ${status}\n\n💡 Use /start_collecting to begin collecting!`
   );
 });
 
-bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
+bot.onText(/^\/check_balance$/, async (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   if (!mnemonic)
     return bot.sendMessage(
@@ -367,15 +349,8 @@ bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
       "🔐 Please connect your wallet first using /connect_wallet or try /setup for a guided experience!"
     );
 
-  const chainKey = match[1].toLowerCase() || "ethereum";
+  const chainKey = "ethereum"; // Default to ethereum
   const config = chains[chainKey];
-  if (!config) {
-    const availableChains = Object.keys(chains).join(", ");
-    return bot.sendMessage(
-      msg.chat.id,
-      `🤔 I don't recognize "${chainKey}". Try one of these: ${availableChains}`
-    );
-  }
 
   try {
     bot.sendMessage(
@@ -426,7 +401,7 @@ bot.onText(/^\/check_balance (.+)/, async (msg, match) => {
       reply += `\n\n🛡️ This is test mode - these aren't real funds`;
     }
 
-    reply += `\n\n💡 Want to collect these funds automatically? \n Use <code>/start_collecting ${chainKey}</code>`;
+    reply += `\n\n💡 Want to collect these funds automatically? \n Use <code>/start_collecting</code>`;
 
     bot.sendMessage(msg.chat.id, reply, { parse_mode: "HTML" });
   } catch (err) {
@@ -458,7 +433,7 @@ bot.onText(/^\/enable/, (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
-    "🔄 Command updated! Please use /start_collecting instead.\n\nExample: /start_collecting ethereum"
+    "🔄 Command updated! Please use /start_collecting instead."
   );
 });
 
@@ -482,7 +457,7 @@ bot.onText(/^\/discover/, (msg) => {
   if (msg.chat.id.toString() !== CHAT_ID) return;
   bot.sendMessage(
     msg.chat.id,
-    "🔄 Command updated! Please use /check_balance instead.\n\nExample: /check_balance ethereum"
+    "🔄 Command updated! Please use /check_balance instead."
   );
 });
 
@@ -506,7 +481,7 @@ bot.on("message", (msg) => {
   ) {
     bot.sendMessage(
       msg.chat.id,
-      "💰 Want to check your balances? Use /check_balance followed by the blockchain name!\n\nExample: /check_balance ethereum"
+      "💰 Want to check your balance? Use /check_balance to see your Ethereum funds!"
     );
   } else if (
     text.includes("start") ||
@@ -515,7 +490,7 @@ bot.on("message", (msg) => {
   ) {
     bot.sendMessage(
       msg.chat.id,
-      "🚀 Ready to start collecting? Use /start_collecting followed by the blockchain name!\n\nExample: /start_collecting polygon\n\n💡 Need to set up first? Try /setup!"
+      "🚀 Ready to start collecting? Use /start_collecting to begin collecting Ethereum funds!\n\n💡 Need to set up first? Try /setup!"
     );
   } else if (text.includes("stop") || text.includes("pause")) {
     bot.sendMessage(
