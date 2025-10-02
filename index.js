@@ -44,8 +44,8 @@ function getChainConfigs() {
         chainId: 11155111,
         rpcUrl: process.env.ETH_RPC,
         usdThreshold: 1,
-        nativeUsdThreshold: 10,
-        pollInterval: 90000, // Increased from 30s to 90s for rate limit optimization
+        nativeUsdThreshold: 5,
+        pollInterval: 5000,
         testnet: true,
       },
       mantle: {
@@ -53,7 +53,7 @@ function getChainConfigs() {
         chainId: 5003,
         usdThreshold: 0.1,
         nativeUsdThreshold: 0.1,
-        pollInterval: 90000, // Increased from 30s to 90s for rate limit optimization
+        pollInterval: 5000,
         testnet: true,
       },
     };
@@ -64,17 +64,17 @@ function getChainConfigs() {
       name: "Ethereum",
       chainId: 1,
       rpcUrl: process.env.ETH_RPC,
-      usdThreshold: 100,
+      usdThreshold: 70,
       nativeUsdThreshold: 70,
-      pollInterval: 60000, // Increased from 20s to 60s
+      pollInterval: 5000,
       testnet: false,
     },
     mantle: {
       name: "Mantle",
       chainId: 5000,
-      usdThreshold: 100,
-      nativeUsdThreshold: 100,
-      pollInterval: 60000, // Increased from 20s to 60s
+      usdThreshold: 70,
+      nativeUsdThreshold: 70,
+      pollInterval: 5000,
       testnet: false,
     },
   };
