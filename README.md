@@ -110,24 +110,6 @@ TESTNET_MODE=true
 npm start
 ```
 
-For multi-user mode:
-
-```bash
-npm run start:multiuser
-```
-
-### Telegram Commands
-
-| Command                 | Description                              | Example                         |
-| ----------------------- | ---------------------------------------- | ------------------------------- |
-| `/help`                 | Show available commands and current mode | `/help`                         |
-| `/setwallet <mnemonic>` | Set wallet to monitor (12/24 words)      | `/setwallet abandon abandon...` |
-| `/settarget <address>`  | Set destination for swept tokens         | `/settarget 0x1234...`          |
-| `/enable <chain>`       | Start sweeping on a chain                | `/enable ethereum`              |
-| `/disable`              | Stop all sweepers                        | `/disable`                      |
-| `/status`               | Check sweeper status                     | `/status`                       |
-| `/discover <chain>`     | Check current balances                   | `/discover polygon`             |
-
 ### 📝 Easy Input Mode
 
 **No need to type commands!** The bot supports direct pasting for easier setup:
@@ -147,7 +129,7 @@ The bot automatically detects and processes:
 1. Start bot: /help
 2. Paste: abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about
 3. Paste: 0x1234567890123456789012345678901234567890
-4. Enable: /enable ethereum
+4. Enable: /start
 ```
 
 ### Supported Chains
@@ -157,29 +139,6 @@ The same chain names work in both mainnet and testnet modes:
 - `ethereum` - Ethereum (ETH) / Sepolia
 - `polygon` - Polygon (MATIC) / Mumbai
 - `mantle` - Mantle (MNT) / Mantle Sepolia
-
-### Example Workflow
-
-**Traditional Command Method:**
-
-```
-/help
-/setwallet abandon abandon abandon... (your mnemonic)
-/settarget 0x1234567890123456789012345678901234567890
-/enable ethereum
-/enable polygon
-/status
-```
-
-**Easy Paste Method:**
-
-```
-/help
-abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about
-0x1234567890123456789012345678901234567890
-/enable ethereum
-/status
-```
 
 ## 🔔 Notifications
 
@@ -235,15 +194,6 @@ const chains = {
   // Additional chains...
 };
 ```
-
-### Scripts Available
-
-| Script            | Command                   | Description                         |
-| ----------------- | ------------------------- | ----------------------------------- |
-| Start Single User | `npm start`               | Run single-user mode                |
-| Start Multi-User  | `npm run start:multiuser` | Run multi-user mode (up to 3 users) |
-| Development       | `npm run dev`             | Run with auto-restart               |
-| Test Multi-User   | `npm run test:multiuser`  | Test multi-user functionality       |
 
 ## 🔒 Security Features
 
@@ -351,13 +301,6 @@ NEW_TESTNET_RPC=https://new-testnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}
 - ✅ **Unified command interface** - Same commands work across all chains
 - ✅ **Testnet support** - Built-in testnet configurations for safe testing
 
-### Testing New Chains
-
-```bash
-# Test your new chain configuration
-npm run test:multiuser
-```
-
 ## 📦 Dependencies
 
 | Package                                                                 | Version | Purpose                          |
@@ -393,10 +336,6 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 - Update documentation as needed
 - Test thoroughly with testnet mode before production
 
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## ⚠️ Disclaimer
 
 This software is provided as-is for educational and automation purposes. Use at your own risk. The developers are not responsible for any financial losses. Always:
@@ -405,15 +344,3 @@ This software is provided as-is for educational and automation purposes. Use at 
 - 🔒 Understand the security implications
 - 📚 Review the code before use
 - 💰 Never risk more than you can afford to lose
-
----
-
-## 🎯 Project Stats
-
-- 🚀 **Multi-chain ready** - Ethereum, Polygon, Mantle support
-- 👥 **Multi-user capable** - Up to 3 concurrent users
-- 🔐 **Security focused** - Encrypted storage, isolated user data
-- 🧪 **Test friendly** - Comprehensive testnet mode
-- 📈 **Production ready** - Used in live environments
-
-**Made with ❤️ for the DeFi community**

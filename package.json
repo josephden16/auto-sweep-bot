@@ -5,8 +5,6 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "start:multiuser": "node index-multiuser.js",
-    "test:multiuser": "node test-multiuser.js",
     "dev": "nodemon index.js",
     "dev:multiuser": "nodemon index-multiuser.js"
   },
