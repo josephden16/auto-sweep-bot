@@ -16,8 +16,8 @@ A powerful Telegram bot that automatically sweeps native tokens and ERC-20 token
 - 💰 **Automatic token sweeping** - Both native and ERC-20 tokens
 - 💵 **USD threshold filtering** - Only sweep tokens above specified value
 - 📱 **Telegram bot interface** - Easy control and monitoring
-- � **Smart input detection** - Paste seed phrases and addresses directly (no commands needed)
-- �🔔 **Real-time notifications** - Instant alerts with blockchain explorer links
+- 📥 **Smart input detection** - Paste seed phrases and addresses directly (no commands needed)
+- 🔔 **Real-time notifications** - Instant alerts with blockchain explorer links
 - 🧪 **Testnet mode** - Safe testing environment with test networks
 - 🔐 **Secure user management** - Encrypted storage of sensitive data
 - 📊 **Comprehensive logging** - Detailed operation logs and status tracking
