@@ -20,12 +20,12 @@ class PriceManager {
     this.requestQueue = [];
     this.isProcessingQueue = false;
 
-    // Configuration
-    this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-    this.RATE_LIMIT_DELAY = 1000; // 1 second between requests
+    // Configuration - Updated for CoinGecko rate limits (30 calls/min, 10K calls/month)
+    this.CACHE_TTL = 30 * 60 * 1000; // 30 minutes (conservative caching for rate limit preservation)
+    this.RATE_LIMIT_DELAY = 2000; // 2 seconds between requests (30 calls/min = 1 call every 2s)
     this.BATCH_SIZE = 30; // Max symbols per batch request
     this.MAX_RETRIES = 3;
-    this.RETRY_DELAY = 2000; // 2 seconds
+    this.RETRY_DELAY = 5000; // 5 seconds (increased for rate limit scenarios)
   }
 
   // Get price with caching and batching
@@ -42,7 +42,16 @@ class PriceManager {
 
     // Check if request is already pending
     if (this.pendingRequests.has(normalizedSymbol)) {
-      return await this.pendingRequests.get(normalizedSymbol);
+      try {
+        return await this.pendingRequests.get(normalizedSymbol);
+      } catch (error) {
+        // If pending request fails, fall back to stale cache if available
+        if (cached) {
+          console.log(`⚠️ Using stale cached price for ${normalizedSymbol} due to fetch error: $${cached.price}`);
+          return cached.price;
+        }
+        return 0;
+      }
     }
 
     // Create new request promise
@@ -52,6 +61,14 @@ class PriceManager {
     try {
       const price = await requestPromise;
       return price;
+    } catch (error) {
+      // If request fails, fall back to stale cache if available
+      if (cached) {
+        console.log(`⚠️ Using stale cached price for ${normalizedSymbol} due to fetch error: $${cached.price}`);
+        return cached.price;
+      }
+      console.log(`❌ No price available for ${normalizedSymbol}: ${error.message}`);
+      return 0;
     } finally {
       this.pendingRequests.delete(normalizedSymbol);
     }
@@ -79,8 +96,20 @@ class PriceManager {
 
     // Fetch missing prices in batches
     if (needsRefresh.length > 0) {
-      const freshPrices = await this._batchFetchPrices(needsRefresh);
-      Object.assign(results, freshPrices);
+      try {
+        const freshPrices = await this._batchFetchPrices(needsRefresh);
+        Object.assign(results, freshPrices);
+      } catch (error) {
+        console.log(`⚠️ Batch price fetch failed, using any available stale cache data`);
+        // For symbols that failed to fetch, check if we have stale cache data
+        for (const symbol of needsRefresh) {
+          const cached = this.cache.get(symbol);
+          if (cached && !results[symbol]) {
+            results[symbol] = { usd: cached.price };
+            console.log(`📦 Using stale cached price for ${symbol}: $${cached.price}`);
+          }
+        }
+      }
     }
 
     return results;
@@ -161,13 +190,9 @@ class PriceManager {
       });
 
       if (response.status === 429) {
-        // Rate limited
-        const retryAfter = parseInt(
-          response.headers.get("retry-after") || "60"
-        );
-        console.log(`⚠️ CoinGecko rate limited, waiting ${retryAfter}s...`);
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
-        return await this._batchFetchPrices(symbols, retryCount);
+        // Rate limited - return cached data immediately instead of waiting
+        console.log(`⚠️ CoinGecko rate limited - using cached data to avoid delays`);
+        return this._getCachedPricesForSymbols(symbols);
       }
 
       if (!response.ok) {
@@ -200,12 +225,30 @@ class PriceManager {
         return await this._batchFetchPrices(symbols, retryCount + 1);
       }
 
-      // Return empty object on final failure
+      // On final failure, return cached data if available, otherwise empty object
       console.log(
-        `💥 Final failure fetching prices for: ${symbols.join(", ")}`
+        `💥 Final failure fetching prices for: ${symbols.join(", ")} - falling back to cached data`
       );
+      const cachedData = this._getCachedPricesForSymbols(symbols);
+      if (Object.keys(cachedData).length > 0) {
+        console.log(`✅ Using cached data for ${Object.keys(cachedData).length} symbols`);
+        return cachedData;
+      }
       return {};
     }
+  }
+
+  // Helper method to get cached prices for specific symbols
+  _getCachedPricesForSymbols(symbols) {
+    const result = {};
+    for (const symbol of symbols) {
+      const cached = this.cache.get(symbol);
+      if (cached) {
+        result[symbol] = { usd: cached.price };
+        console.log(`📦 Using cached price for ${symbol}: $${cached.price} (age: ${Math.round((Date.now() - cached.timestamp) / 1000)}s)`);
+      }
+    }
+    return result;
   }
 
   // Clear expired cache entries
@@ -225,6 +268,19 @@ class PriceManager {
       pendingRequests: this.pendingRequests.size,
       queueLength: this.requestQueue.length,
     };
+  }
+
+  // Check if we have any cached price (even if stale) for emergency fallback
+  hasAnyCachedPrice(symbol) {
+    const normalizedSymbol = symbol.toLowerCase();
+    return this.cache.has(normalizedSymbol);
+  }
+
+  // Get stale cached price if available (for rate limit scenarios)
+  getStaleCachedPrice(symbol) {
+    const normalizedSymbol = symbol.toLowerCase();
+    const cached = this.cache.get(normalizedSymbol);
+    return cached ? cached.price : null;
   }
 }
 
